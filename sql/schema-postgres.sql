@@ -1,0 +1,15 @@
+CREATE TABLE IF NOT EXISTS events (
+  id SERIAL PRIMARY KEY,
+  title VARCHAR(255) NOT NULL,
+  event_date TIMESTAMP NOT NULL,
+  location VARCHAR(255) NOT NULL,
+  capacity INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS bookings (
+  id SERIAL PRIMARY KEY,
+  event_id INTEGER NOT NULL REFERENCES events(id),
+  attendee_name VARCHAR(255) NOT NULL,
+  attendee_email VARCHAR(255) NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);

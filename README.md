@@ -1,0 +1,196 @@
+# Event Booking App
+
+Minimal event booking system with two REST endpoints:
+- `POST /events` — create an event
+- `POST /bookings` — book a slot at an event
+
+Two things live in this repo:
+
+1. **`app/`, `lib/`** — a Next.js app used purely for local development and
+   testing against Docker Postgres. This is NOT what gets deployed to AWS.
+2. **`lambda/`, `terraform/aws/`** — the actual AWS deployment: two Lambda
+   functions behind API Gateway, talking to RDS PostgreSQL. This is the
+   proposal-faithful "serverless" implementation.
+
+Azure's equivalent (Azure Functions + Azure SQL Database) will mirror the
+`lambda/` structure once we get there — same two endpoints, same schema.
+
+## 1. Local testing first (before touching the cloud)
+
+Requires Docker Desktop running.
+
+```powershell
+# start a local Postgres container
+docker-compose up -d
+
+# create the tables
+Get-Content sql\schema-postgres.sql | docker exec -i event-app-postgres-1 psql -U user -d eventdb
+
+# install dependencies
+npm install
+
+# copy env template (already points at local Docker Postgres)
+copy .env.example .env.local
+
+# run the dev server
+npm run dev
+```
+
+Test with PowerShell's `Invoke-RestMethod` (not `curl` — that's aliased to
+`Invoke-WebRequest` on Windows and handles quotes differently):
+
+```powershell
+Invoke-RestMethod -Uri http://localhost:3000/api/events -Method Post -ContentType "application/json" -Body '{"title":"CN6000 Demo Day","date":"2026-08-01T10:00:00Z","location":"LSBF Singapore","capacity":50}'
+
+Invoke-RestMethod -Uri http://localhost:3000/api/bookings -Method Post -ContentType "application/json" -Body '{"eventId":1,"attendeeName":"Jin","attendeeEmail":"jin@example.com"}'
+```
+
+## 2. Deploying to AWS (Lambda + API Gateway + RDS)
+
+The `lambda/` folder holds the actual AWS handlers — plain Node.js, no
+Next.js involved. `terraform/aws/` provisions the infrastructure.
+
+**Step A — build the Lambda deployment packages:**
+
+```powershell
+.\build-lambda.ps1
+```
+
+This installs `pg` into `lambda/layer/nodejs/`, then zips the layer and
+both function folders into `lambda/layer.zip`, `lambda/events.zip`, and
+`lambda/bookings.zip`. Terraform references these zip files directly.
+
+**Step B — set your DB password:**
+
+```powershell
+cd terraform\aws
+copy terraform.tfvars.example terraform.tfvars
+```
+
+Open `terraform.tfvars` and set a real password (8+ characters). This file
+is gitignored — never commit it.
+
+**Step C — deploy:**
+
+```powershell
+terraform init
+terraform plan
+terraform apply
+```
+
+Review the plan, type `yes` to confirm. This creates the RDS instance
+(takes a few minutes), the Lambda functions, the layer, and API Gateway.
+
+**Step D — create the tables on RDS:**
+
+Once `terraform apply` finishes, it prints `rds_endpoint`. Connect using
+that address (e.g. with `psql` or a GUI tool like pgAdmin/DBeaver) and run
+`sql/schema-postgres.sql` against it — same schema as local, just against
+the real RDS instance.
+
+**Step E — test the deployed API:**
+
+`terraform apply` also prints `api_endpoint`. Test it the same way as
+local, just swap the URL:
+
+```powershell
+Invoke-RestMethod -Uri "<api_endpoint>/events" -Method Post -ContentType "application/json" -Body '{"title":"CN6000 Demo Day","date":"2026-08-01T10:00:00Z","location":"LSBF Singapore","capacity":50}'
+```
+
+## 3. Deploying to Azure (Functions + Azure SQL Database)
+
+The `azure-functions/` folder holds the Azure-side handlers, written with
+the Azure Functions v4 programming model — structurally close to the
+Lambda handlers (same routes, same request/response shape), just using
+`mssql` instead of `pg`. `terraform/azure/` provisions the infrastructure.
+
+**Step A — install Azure Functions Core Tools** (needed to publish the
+function code — Terraform provisions the infrastructure, but code
+deployment for Functions is normally done through this tool):
+
+```powershell
+npm install -g azure-functions-core-tools@4 --unsafe-perm true
+```
+
+**Step B — set your SQL admin password:**
+
+```powershell
+cd terraform\azure
+copy terraform.tfvars.example terraform.tfvars
+notepad terraform.tfvars
+```
+
+The `subscription_id` is already filled in from your `az account show`
+output. Set a real `sql_admin_password` (8+ characters, avoid `/`, `@`,
+`"`, and spaces — same rule as the AWS RDS password).
+
+**Step C — deploy the infrastructure:**
+
+```powershell
+terraform init
+terraform plan
+terraform apply
+```
+
+Type `yes` to confirm. This creates the resource group, storage account,
+Consumption plan, Function App, and Azure SQL Server/Database — a couple
+of minutes, faster than RDS was.
+
+**Step D — create the tables on Azure SQL:**
+
+Terraform prints `sql_server_fqdn` when done. Connect with `sqlcmd`
+(installs alongside the same PostgreSQL/SQL client tooling, or via
+`winget install -e --id Microsoft.SqlServer.CmdLineUtils`) and run
+`sql/schema-mssql.sql` against it — mirrors what we did with `psql` on
+the AWS side.
+
+**Step E — publish the function code:**
+
+```powershell
+cd ..\..\azure-functions
+func azure functionapp publish <function_app_name>
+```
+
+(`<function_app_name>` is the `function_app_name` output from Step C.)
+This uploads and deploys the actual JavaScript — Terraform never touches
+your function code directly, only the infrastructure around it.
+
+**Step F — test the deployed API:**
+
+```powershell
+Invoke-RestMethod -Uri "<function_app_url>/api/events" -Method Post -ContentType "application/json" -Body '{"title":"CN6000 Demo Day","date":"2026-08-01T10:00:00Z","location":"LSBF Singapore","capacity":50}'
+```
+
+Note the `/api/` prefix — Azure Functions HTTP triggers are namespaced
+under `/api/` by default, unlike the AWS API Gateway routes which were
+bare `/events` and `/bookings`. Worth flagging in your report as one of
+the small but real API-shape differences between the two clouds.
+
+## 4. Security note (for the report)
+
+RDS is set to `publicly_accessible = true` with inbound open on port 5432.
+This is intentional for coursework simplicity — it avoids putting Lambda in
+a VPC (which would need a NAT Gateway, adding cost and complexity). In a
+production deployment, RDS would sit in a private subnet reachable only
+from Lambda's own security group.
+
+On the Azure side, the SQL Server firewall allows Azure services generally
+(since the Consumption-plan Function App has no fixed outbound IP) plus
+your own machine's current IP for direct schema access. Same underlying
+tradeoff as the AWS side, different mechanism — both worth a sentence or
+two in your Design or Testing chapter.
+
+## 5. Tearing down (to avoid burning through credits)
+
+When you're done experimenting for the day:
+
+```powershell
+cd terraform\aws
+terraform destroy
+
+cd ..\azure
+terraform destroy
+```
+
+Re-run `terraform apply` (and re-publish the Azure function code) next
+time you need it back up.

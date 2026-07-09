@@ -1,0 +1,23 @@
+node_modules/
+.next/
+.env
+.env.local
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+terraform.tfvars
+crash.log
+
+# Lambda build artifacts
+lambda/layer.zip
+lambda/events.zip
+lambda/bookings.zip
+lambda/layer/nodejs/node_modules/
+
+# Azure Functions
+azure-functions/local.settings.json
+azure-functions/node_modules/
+azure-functions/bin/
+azure-functions/obj/

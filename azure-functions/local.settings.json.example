@@ -1,0 +1,11 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "FUNCTIONS_WORKER_RUNTIME": "node",
+    "DB_SERVER": "your-azure-sql-server.database.windows.net",
+    "DB_NAME": "eventdb",
+    "DB_USER": "your-admin-username",
+    "DB_PASSWORD": "your-admin-password"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "name": "event-app-azure-functions",
+  "version": "1.0.0",
+  "main": "src/functions/*.js",
+  "private": true,
+  "scripts": {
+    "start": "func start"
+  },
+  "dependencies": {
+    "@azure/functions": "^4.5.0",
+    "mssql": "^11.0.1"
+  }
+}
