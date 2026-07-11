@@ -1,3 +1,7 @@
+# Uses the eventapp-rg resource group that Terraform already created.
+# Does NOT suppress errors this time, so we can tell a real region-policy
+# block apart from any other kind of failure.
+
 $resourceGroup = "eventapp-rg"
 
 Write-Host "Fetching full region list..."
