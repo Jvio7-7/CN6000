@@ -129,6 +129,23 @@ resource "aws_lambda_function" "book_event" {
   }
 }
 
+resource "aws_lambda_function" "health" {
+  function_name    = "${var.project_name}-health"
+  filename         = "${path.module}/../../lambda/health.zip"
+  source_code_hash = filebase64sha256("${path.module}/../../lambda/health.zip")
+  handler          = "index.handler"
+  runtime          = "nodejs20.x"
+  role             = aws_iam_role.lambda_exec.arn
+  layers           = [aws_lambda_layer_version.db_layer.arn]
+  timeout          = 5
+
+  environment {
+    variables = {
+      DATABASE_URL = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
+    }
+  }
+}
+
 # -------------------------------------------------------------------------
 # API Gateway (HTTP API) — routes requests to the two Lambda functions
 # -------------------------------------------------------------------------
@@ -158,6 +175,13 @@ resource "aws_apigatewayv2_integration" "book_event" {
   payload_format_version = "2.0"
 }
 
+resource "aws_apigatewayv2_integration" "health" {
+  api_id                 = aws_apigatewayv2_api.http_api.id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = aws_lambda_function.health.invoke_arn
+  payload_format_version = "2.0"
+}
+
 resource "aws_apigatewayv2_route" "create_event" {
   api_id    = aws_apigatewayv2_api.http_api.id
   route_key = "POST /events"
@@ -168,6 +192,12 @@ resource "aws_apigatewayv2_route" "book_event" {
   api_id    = aws_apigatewayv2_api.http_api.id
   route_key = "POST /bookings"
   target    = "integrations/${aws_apigatewayv2_integration.book_event.id}"
+}
+
+resource "aws_apigatewayv2_route" "health" {
+  api_id    = aws_apigatewayv2_api.http_api.id
+  route_key = "GET /health"
+  target    = "integrations/${aws_apigatewayv2_integration.health.id}"
 }
 
 resource "aws_lambda_permission" "create_event_apigw" {
@@ -182,6 +212,14 @@ resource "aws_lambda_permission" "book_event_apigw" {
   statement_id  = "AllowAPIGatewayInvokeBookEvent"
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.book_event.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.http_api.execution_arn}/*/*"
+}
+
+resource "aws_lambda_permission" "health_apigw" {
+  statement_id  = "AllowAPIGatewayInvokeHealth"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.health.function_name
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${aws_apigatewayv2_api.http_api.execution_arn}/*/*"
 }

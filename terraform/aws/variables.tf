@@ -1,7 +1,7 @@
 variable "aws_region" {
   description = "AWS region to deploy into"
   type        = string
-  default     = "us-west-1"
+  default     = "ap-southeast-1"
 }
 
 variable "db_username" {

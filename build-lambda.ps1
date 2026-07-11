@@ -18,4 +18,8 @@ Write-Host "Zipping bookings function..."
 if (Test-Path lambda/bookings.zip) { Remove-Item lambda/bookings.zip }
 Compress-Archive -Path lambda/bookings/index.js -DestinationPath lambda/bookings.zip
 
-Write-Host "Done. lambda/layer.zip, lambda/events.zip, lambda/bookings.zip are ready for Terraform."
+Write-Host "Zipping health function..."
+if (Test-Path lambda/health.zip) { Remove-Item lambda/health.zip }
+Compress-Archive -Path lambda/health/index.js -DestinationPath lambda/health.zip
+
+Write-Host "Done. lambda/layer.zip, lambda/events.zip, lambda/bookings.zip, lambda/health.zip are ready for Terraform."

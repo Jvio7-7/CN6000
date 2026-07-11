@@ -166,7 +166,78 @@ under `/api/` by default, unlike the AWS API Gateway routes which were
 bare `/events` and `/bookings`. Worth flagging in your report as one of
 the small but real API-shape differences between the two clouds.
 
-## 4. Security note (for the report)
+## 4. Cross-cloud routing (Route 53 Active/Active failover)
+
+This ties both clouds into one system, using Route 53 as a single global
+routing layer that health-checks both AWS and Azure and automatically
+shifts traffic away from whichever one is unhealthy.
+
+**Step A — deploy the new `/health` endpoints:**
+
+AWS side (rebuild the Lambda zips to pick up the new health function,
+then re-apply):
+```powershell
+cd C:\Users\Jvio77\Desktop\event-app
+.\build-lambda.ps1
+cd terraform\aws
+terraform apply
+```
+
+Azure side (the v4 programming model auto-discovers the new
+`health.js` file, just needs a re-publish):
+```powershell
+cd ..\..\azure-functions
+func azure functionapp publish <function_app_name> --javascript
+```
+
+**Step B — confirm both health endpoints work before wiring up Route 53:**
+```powershell
+Invoke-RestMethod -Uri "<api_endpoint>/health"
+Invoke-RestMethod -Uri "<function_app_url>/api/health"
+```
+Both should return `{"status":"ok","cloud":"aws"}` / `{"status":"ok","cloud":"azure"}`.
+If either fails, fix that before moving on — Route 53 health checks won't
+make sense against a broken endpoint.
+
+**Step C — deploy the Route 53 layer:**
+```powershell
+cd ..\terraform\global
+terraform init
+terraform apply
+```
+Type `yes`. This creates the hosted zone, two health checks (one per
+cloud), and two weighted CNAME records (50/50 split).
+
+**Step D — no domain needed.** Since this project doesn't use a
+registered/purchased domain, the hosted zone isn't publicly delegated.
+Instead, query Route 53's own name servers directly — this is a
+completely valid way to test failover behaviour, and arguably cleaner
+for the RTO experiment since it isolates Route 53's own failover logic
+from public DNS caching effects elsewhere in the resolution chain.
+
+Terraform prints `name_servers` and `record_fqdn` when done. Test
+resolution like this:
+```powershell
+Resolve-DnsName -Name <record_fqdn> -Type CNAME -Server <one_of_the_name_servers>
+```
+Run it a few times — you should see it return either the AWS or Azure
+CNAME roughly 50/50, confirming the weighted Active/Active split is
+working.
+
+**Step E — health check propagation takes a few minutes.** Route 53
+health checks need a little time after creation before they've actually
+run enough checks to report a status. Give it 2-3 minutes, then check:
+```powershell
+aws route53 get-health-check-status --health-check-id <aws_health_check_id>
+aws route53 get-health-check-status --health-check-id <azure_health_check_id>
+```
+Both should eventually show `Success`.
+
+Failover testing itself (deliberately breaking one cloud's health check
+and timing how long Route 53 takes to stop returning it) is Phase 6 —
+that's literally the RTO measurement.
+
+## 5. Security note (for the report)
 
 RDS is set to `publicly_accessible = true` with inbound open on port 5432.
 This is intentional for coursework simplicity — it avoids putting Lambda in
@@ -180,12 +251,15 @@ your own machine's current IP for direct schema access. Same underlying
 tradeoff as the AWS side, different mechanism — both worth a sentence or
 two in your Design or Testing chapter.
 
-## 5. Tearing down (to avoid burning through credits)
+## 6. Tearing down (to avoid burning through credits)
 
 When you're done experimenting for the day:
 
 ```powershell
-cd terraform\aws
+cd terraform\global
+terraform destroy
+
+cd ..\aws
 terraform destroy
 
 cd ..\azure
