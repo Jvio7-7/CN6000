@@ -176,6 +176,97 @@ h1 {
   cursor: not-allowed;
 }
 
+/* ---------- events browser ---------- */
+
+.eventsCard {
+  margin-bottom: 20px;
+}
+
+.eventsCard .cardHead {
+  justify-content: space-between;
+}
+
+.refreshBtn {
+  margin-left: auto;
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+
+.refreshBtn:hover {
+  border-color: var(--accent);
+}
+
+.refreshBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.eventList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.eventRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.eventInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.eventTitle {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.eventMeta {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.eventId {
+  font-family: var(--font-display);
+  font-size: 11px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bookBtn {
+  flex-shrink: 0;
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent-ink);
+  background: var(--accent);
+  border: none;
+  border-radius: 6px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+
+.bookBtn:hover {
+  opacity: 0.9;
+}
+
 /* ---------- response log ---------- */
 
 .log {

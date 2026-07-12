@@ -117,4 +117,14 @@ async function replicateBooking(record) {
   );
 }
 
-module.exports = { createEvent, createBooking, replicateEvent, replicateBooking };
+async function listEvents() {
+  const db = getPool();
+  const result = await db.query(
+    `SELECT id, title, event_date, location, capacity, origin_cloud
+     FROM events
+     ORDER BY event_date ASC`
+  );
+  return result.rows;
+}
+
+module.exports = { createEvent, createBooking, replicateEvent, replicateBooking, listEvents };

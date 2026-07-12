@@ -108,3 +108,25 @@ export async function createBooking(data: BookingInput) {
   );
   return result.rows[0];
 }
+
+export async function listEvents() {
+  if (DB_TYPE === 'mssql') {
+    const pool = await getMssqlPool();
+    const result = await pool
+      .request()
+      .query(
+        `SELECT id, title, event_date, location, capacity
+         FROM events
+         ORDER BY event_date ASC`
+      );
+    return result.recordset;
+  }
+
+  const pool = getPgPool();
+  const result = await pool.query(
+    `SELECT id, title, event_date, location, capacity
+     FROM events
+     ORDER BY event_date ASC`
+  );
+  return result.rows;
+}

@@ -14,6 +14,10 @@ Write-Host "Zipping events function..."
 if (Test-Path lambda/events.zip) { Remove-Item lambda/events.zip }
 Compress-Archive -Path lambda/events/index.js -DestinationPath lambda/events.zip
 
+Write-Host "Zipping list-events function..."
+if (Test-Path lambda/list-events.zip) { Remove-Item lambda/list-events.zip }
+Compress-Archive -Path lambda/list-events/index.js -DestinationPath lambda/list-events.zip
+
 Write-Host "Zipping bookings function..."
 if (Test-Path lambda/bookings.zip) { Remove-Item lambda/bookings.zip }
 Compress-Archive -Path lambda/bookings/index.js -DestinationPath lambda/bookings.zip

@@ -131,6 +131,23 @@ resource "aws_lambda_function" "book_event" {
   }
 }
 
+resource "aws_lambda_function" "list_events" {
+  function_name    = "${var.project_name}-list-events"
+  filename         = "${path.module}/../../lambda/list-events.zip"
+  source_code_hash = filebase64sha256("${path.module}/../../lambda/list-events.zip")
+  handler          = "index.handler"
+  runtime          = "nodejs20.x"
+  role             = aws_iam_role.lambda_exec.arn
+  layers           = [aws_lambda_layer_version.db_layer.arn]
+  timeout          = 10
+
+  environment {
+    variables = {
+      DATABASE_URL = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
+    }
+  }
+}
+
 resource "aws_lambda_function" "health" {
   function_name    = "${var.project_name}-health"
   filename         = "${path.module}/../../lambda/health.zip"
@@ -209,6 +226,13 @@ resource "aws_apigatewayv2_integration" "create_event" {
   payload_format_version = "2.0"
 }
 
+resource "aws_apigatewayv2_integration" "list_events" {
+  api_id                 = aws_apigatewayv2_api.http_api.id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = aws_lambda_function.list_events.invoke_arn
+  payload_format_version = "2.0"
+}
+
 resource "aws_apigatewayv2_integration" "book_event" {
   api_id                 = aws_apigatewayv2_api.http_api.id
   integration_type       = "AWS_PROXY"
@@ -243,6 +267,12 @@ resource "aws_apigatewayv2_route" "create_event" {
   target    = "integrations/${aws_apigatewayv2_integration.create_event.id}"
 }
 
+resource "aws_apigatewayv2_route" "list_events" {
+  api_id    = aws_apigatewayv2_api.http_api.id
+  route_key = "GET /events"
+  target    = "integrations/${aws_apigatewayv2_integration.list_events.id}"
+}
+
 resource "aws_apigatewayv2_route" "book_event" {
   api_id    = aws_apigatewayv2_api.http_api.id
   route_key = "POST /bookings"
@@ -271,6 +301,14 @@ resource "aws_lambda_permission" "create_event_apigw" {
   statement_id  = "AllowAPIGatewayInvokeCreateEvent"
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.create_event.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.http_api.execution_arn}/*/*"
+}
+
+resource "aws_lambda_permission" "list_events_apigw" {
+  statement_id  = "AllowAPIGatewayInvokeListEvents"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.list_events.function_name
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${aws_apigatewayv2_api.http_api.execution_arn}/*/*"
 }

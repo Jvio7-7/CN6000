@@ -140,4 +140,16 @@ async function replicateBooking(record) {
     );
 }
 
-module.exports = { createEvent, createBooking, replicateEvent, replicateBooking };
+async function listEvents() {
+  const pool = await getPool();
+  const result = await pool
+    .request()
+    .query(
+      `SELECT id, title, event_date, location, capacity, origin_cloud
+       FROM events
+       ORDER BY event_date ASC`
+    );
+  return result.recordset;
+}
+
+module.exports = { createEvent, createBooking, replicateEvent, replicateBooking, listEvents };

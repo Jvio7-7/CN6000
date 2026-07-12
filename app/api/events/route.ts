@@ -1,5 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createEvent } from '@/lib/db';
+import { createEvent, listEvents } from '@/lib/db';
+
+export async function GET() {
+  try {
+    const events = await listEvents();
+    return NextResponse.json(events, { status: 200 });
+  } catch (err) {
+    console.error('Failed to list events:', err);
+    return NextResponse.json({ error: 'Failed to list events' }, { status: 500 });
+  }
+}
 
 export async function POST(req: NextRequest) {
   try {

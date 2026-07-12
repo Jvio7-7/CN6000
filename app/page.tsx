@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 
 interface LogEntry {
   id: number;
@@ -8,6 +8,14 @@ interface LogEntry {
   route: string;
   status: number;
   body: string;
+}
+
+interface EventRecord {
+  id: string;
+  title: string;
+  event_date: string;
+  location: string;
+  capacity: number;
 }
 
 let logId = 0;
@@ -25,6 +33,8 @@ export default function Home() {
     attendeeEmail: '',
   });
   const [log, setLog] = useState<LogEntry[]>([]);
+  const [events, setEvents] = useState<EventRecord[]>([]);
+  const [loadingEvents, setLoadingEvents] = useState(false);
   const [submittingEvent, setSubmittingEvent] = useState(false);
   const [submittingBooking, setSubmittingBooking] = useState(false);
 
@@ -34,6 +44,28 @@ export default function Home() {
       { id: logId, method, route, status, body: JSON.stringify(body, null, 2) },
       ...prev,
     ]);
+  }
+
+  async function refreshEvents() {
+    setLoadingEvents(true);
+    try {
+      const res = await fetch('/api/events');
+      const data = await res.json();
+      if (res.ok) setEvents(data);
+    } catch (err) {
+      // Silent - the log panel already surfaces API errors from form submits
+    } finally {
+      setLoadingEvents(false);
+    }
+  }
+
+  useEffect(() => {
+    refreshEvents();
+  }, []);
+
+  function bookThisEvent(id: string) {
+    setBookingForm({ ...bookingForm, eventId: id });
+    document.getElementById('attendeeName')?.focus();
   }
 
   async function handleCreateEvent(e: React.FormEvent) {
@@ -54,6 +86,7 @@ export default function Home() {
       pushLog('POST', '/api/events', res.status, data);
       if (res.ok) {
         setEventForm({ title: '', date: '', location: '', capacity: '' });
+        refreshEvents();
       }
     } catch (err) {
       pushLog('POST', '/api/events', 0, { error: 'Network error' });
@@ -100,6 +133,40 @@ export default function Home() {
           logged underneath, same as the requests running against AWS
           Lambda and Azure Functions in the deployed environments.
         </p>
+
+        <div className="card eventsCard">
+          <div className="cardHead">
+            <span className="step">00</span>
+            <h2 className="cardTitle">Upcoming events</h2>
+            <button className="refreshBtn" onClick={refreshEvents} disabled={loadingEvents}>
+              {loadingEvents ? 'Loading…' : '↻ Refresh'}
+            </button>
+          </div>
+
+          {events.length === 0 ? (
+            <p className="logEmpty">
+              No events yet — create one below, or hit refresh if you expect
+              to see events replicated from the other cloud.
+            </p>
+          ) : (
+            <div className="eventList">
+              {events.map((ev) => (
+                <div className="eventRow" key={ev.id}>
+                  <div className="eventInfo">
+                    <span className="eventTitle">{ev.title}</span>
+                    <span className="eventMeta">
+                      {new Date(ev.event_date).toLocaleString()} · {ev.location} · cap {ev.capacity}
+                    </span>
+                    <span className="eventId">{ev.id}</span>
+                  </div>
+                  <button className="bookBtn" onClick={() => bookThisEvent(ev.id)}>
+                    Book this →
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
 
         <div className="grid">
           <form className="card" onSubmit={handleCreateEvent}>
