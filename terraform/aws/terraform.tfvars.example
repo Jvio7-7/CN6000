@@ -1,4 +1,5 @@
-# Copy this to terraform.tfvars (which is gitignored) and fill in a real password.
-# Do NOT commit terraform.tfvars — it contains your DB password.
+# Copy this to terraform.tfvars (which is gitignored) and fill in real values.
+# Do NOT commit terraform.tfvars - it contains your DB password.
 
-db_password = "ChangeMe123!"
+db_password    = "ChangeMe123!"
+azure_base_url = "https://eventapp-func-zhw36q.azurewebsites.net/api"

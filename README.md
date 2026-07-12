@@ -237,7 +237,89 @@ Failover testing itself (deliberately breaking one cloud's health check
 and timing how long Route 53 takes to stop returning it) is Phase 6 —
 that's literally the RTO measurement.
 
-## 5. Security note (for the report)
+## 5. Cross-cloud data replication (dual-write, UUID-keyed)
+
+Route 53 (section 4) makes both clouds reachable under one system and
+automatically routes around outages — but it doesn't sync **data**. Until
+now, AWS and Azure each had a completely independent database: a booking
+made via AWS was invisible to Azure, and vice versa. This section closes
+that gap.
+
+**How it works:** every write generates a UUID (not an auto-increment
+integer — two independent clouds generating their own `1, 2, 3...` would
+eventually collide). The write goes to the local database first, then a
+best-effort HTTP call replicates the same record to the other cloud. The
+local write always succeeds and returns to the user immediately, even if
+replication fails — this is deliberate: an unreachable replica (e.g.
+during a simulated outage) should never block or fail the primary write.
+Whatever didn't make it across before a failure is exactly the data-loss
+window Phase 6's RPO measurement is about.
+
+**Step A — update both tfvars files with each other's URLs:**
+
+In `terraform\aws\terraform.tfvars`, add:
+```hcl
+azure_base_url = "<your function_app_url>/api"
+```
+
+In `terraform\azure\terraform.tfvars`, add:
+```hcl
+aws_base_url = "<your api_endpoint>"
+```
+
+**Step B — rebuild and redeploy AWS** (adds two new Lambda functions:
+`replicate-events`, `replicate-bookings`, plus wires `AZURE_BASE_URL`
+into the existing functions):
+```powershell
+cd C:\Users\Jvio77\Desktop\event-app
+.\build-lambda.ps1
+cd terraform\aws
+terraform apply
+```
+
+**Step C — redeploy Azure infrastructure** (adds `AWS_BASE_URL` app
+setting):
+```powershell
+cd ..\azure
+terraform apply
+```
+
+**Step D — reset both databases.** The schema changed (UUID primary keys
+instead of auto-increment integers), so existing tables need to be
+dropped and recreated — this wipes any test data from earlier phases,
+which is expected:
+```powershell
+# AWS RDS
+cd ..\aws
+$env:PGPASSWORD="<your db password>"
+& "C:\Program Files\PostgreSQL\16\bin\psql.exe" -h <rds_endpoint> -U eventappadmin -d eventdb -f ..\..\sql\schema-postgres.sql
+
+# Azure SQL
+cd ..\..\
+sqlcmd -S <sql_server_fqdn> -d eventdb -U eventappadmin -P "<your sql password>" -i sql\schema-mssql.sql
+```
+
+**Step E — republish the Azure Functions code** (picks up the rewritten
+`db.js` plus the two new `replicateEvent`/`replicateBooking` functions):
+```powershell
+cd azure-functions
+func azure functionapp publish <function_app_name> --javascript
+```
+
+**Step F — test replication in both directions.** Create an event on
+AWS, then check it shows up on Azure's database (and vice versa):
+```powershell
+# create on AWS
+Invoke-RestMethod -Uri "<api_endpoint>/events" -Method Post -ContentType "application/json" -Body '{"title":"Replication Test","date":"2026-08-01T10:00:00Z","location":"Test","capacity":10}'
+
+# wait a couple seconds for replication, then query Azure directly
+sqlcmd -S <sql_server_fqdn> -d eventdb -U eventappadmin -P "<your sql password>" -Q "SELECT id, title, origin_cloud FROM events"
+```
+You should see the event with `origin_cloud = aws` present in the Azure
+database too — proof the replication call worked, not just the local
+write.
+
+## 6. Security note (for the report)
 
 RDS is set to `publicly_accessible = true` with inbound open on port 5432.
 This is intentional for coursework simplicity — it avoids putting Lambda in
@@ -251,7 +333,7 @@ your own machine's current IP for direct schema access. Same underlying
 tradeoff as the AWS side, different mechanism — both worth a sentence or
 two in your Design or Testing chapter.
 
-## 6. Tearing down (to avoid burning through credits)
+## 7. Tearing down (to avoid burning through credits)
 
 When you're done experimenting for the day:
 

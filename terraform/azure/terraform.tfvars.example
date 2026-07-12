@@ -1,5 +1,6 @@
 # Copy this to terraform.tfvars (gitignored) and fill in real values.
-# Do NOT commit terraform.tfvars — it contains your DB password.
+# Do NOT commit terraform.tfvars - it contains your DB password.
 
-subscription_id     = "ae8484e4-7dc1-4251-9244-d1660c189811"
-sql_admin_password  = "ChangeMe123!"
+subscription_id    = "ae8484e4-7dc1-4251-9244-d1660c189811"
+sql_admin_password = "ChangeMe123!"
+aws_base_url        = "https://l30myjhqlk.execute-api.ap-southeast-1.amazonaws.com"

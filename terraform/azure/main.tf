@@ -96,6 +96,7 @@ resource "azurerm_linux_function_app" "main" {
     DB_NAME                  = azurerm_mssql_database.main.name
     DB_USER                  = var.sql_admin_username
     DB_PASSWORD              = var.sql_admin_password
+    AWS_BASE_URL              = var.aws_base_url
   }
 }
 

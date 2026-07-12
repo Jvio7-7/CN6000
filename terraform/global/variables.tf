@@ -1,7 +1,7 @@
 variable "aws_api_domain" {
   description = "AWS API Gateway domain (no https://, no trailing slash)"
   type        = string
-  default = "l30myjhqlk.execute-api.ap-southeast-1.amazonaws.com"
+  default     = "l30myjhqlk.execute-api.ap-southeast-1.amazonaws.com"
 }
 
 variable "azure_function_domain" {

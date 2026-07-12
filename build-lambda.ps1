@@ -22,4 +22,12 @@ Write-Host "Zipping health function..."
 if (Test-Path lambda/health.zip) { Remove-Item lambda/health.zip }
 Compress-Archive -Path lambda/health/index.js -DestinationPath lambda/health.zip
 
-Write-Host "Done. lambda/layer.zip, lambda/events.zip, lambda/bookings.zip, lambda/health.zip are ready for Terraform."
+Write-Host "Zipping replicate-events function..."
+if (Test-Path lambda/replicate-events.zip) { Remove-Item lambda/replicate-events.zip }
+Compress-Archive -Path lambda/replicate-events/index.js -DestinationPath lambda/replicate-events.zip
+
+Write-Host "Zipping replicate-bookings function..."
+if (Test-Path lambda/replicate-bookings.zip) { Remove-Item lambda/replicate-bookings.zip }
+Compress-Archive -Path lambda/replicate-bookings/index.js -DestinationPath lambda/replicate-bookings.zip
+
+Write-Host "Done. All lambda zip files are ready for Terraform."

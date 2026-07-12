@@ -1,9 +1,13 @@
 const sql = require('mssql');
+const crypto = require('crypto');
 
-// Azure Functions app only ever talks to Azure SQL Database, so this is
-// the mssql-only counterpart to the Lambda side's pg-only db.js. Same
-// two operations (createEvent, createBooking), same shape of return
-// values, so the two clouds stay directly comparable in the experiments.
+// Azure side of the active-active replication - mirrors lambda/layer/nodejs/db.js.
+// Replication is awaited (not fire-and-forget) for the same reason as the
+// Lambda side: serverless compute platforms generally don't guarantee that
+// work continues after the response is sent, especially on a Consumption
+// plan where the instance can be recycled. See db.js on the AWS side for
+// the fuller explanation.
+
 let poolPromise;
 
 function getPool() {
@@ -13,7 +17,6 @@ function getPool() {
       database: process.env.DB_NAME,
       user: process.env.DB_USER,
       password: process.env.DB_PASSWORD,
-      // Azure SQL Database requires encrypted connections.
       options: { encrypt: true, trustServerCertificate: false },
       pool: { max: 2 },
     });
@@ -21,35 +24,120 @@ function getPool() {
   return poolPromise;
 }
 
+const AWS_BASE_URL = process.env.AWS_BASE_URL; // e.g. https://l30myjhqlk.execute-api.ap-southeast-1.amazonaws.com
+const REPLICATION_TIMEOUT_MS = 3000;
+
+async function replicateToAws(path, payload) {
+  if (!AWS_BASE_URL) return;
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), REPLICATION_TIMEOUT_MS);
+    const res = await fetch(`${AWS_BASE_URL}${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+    if (!res.ok) {
+      console.error(`Replication to AWS failed: ${path} returned ${res.status}`);
+    } else {
+      console.log(`Replication to AWS succeeded: ${path}`);
+    }
+  } catch (err) {
+    console.error(`Replication to AWS failed: ${path}`, err.message);
+  }
+}
+
 async function createEvent({ title, date, location, capacity }) {
+  const id = crypto.randomUUID();
   const pool = await getPool();
   const result = await pool
     .request()
+    .input('id', sql.UniqueIdentifier, id)
     .input('title', sql.NVarChar, title)
     .input('eventDate', sql.DateTime, date)
     .input('location', sql.NVarChar, location)
     .input('capacity', sql.Int, capacity)
     .query(
-      `INSERT INTO events (title, event_date, location, capacity)
-       OUTPUT INSERTED.id, INSERTED.title, INSERTED.event_date, INSERTED.location, INSERTED.capacity
-       VALUES (@title, @eventDate, @location, @capacity)`
+      `INSERT INTO events (id, title, event_date, location, capacity, origin_cloud)
+       OUTPUT INSERTED.id, INSERTED.title, INSERTED.event_date, INSERTED.location, INSERTED.capacity, INSERTED.origin_cloud
+       VALUES (@id, @title, @eventDate, @location, @capacity, 'azure')`
     );
-  return result.recordset[0];
+  const record = result.recordset[0];
+
+  await replicateToAws('/replicate/events', record);
+
+  return record;
 }
 
 async function createBooking({ eventId, attendeeName, attendeeEmail }) {
+  const id = crypto.randomUUID();
   const pool = await getPool();
   const result = await pool
     .request()
-    .input('eventId', sql.Int, eventId)
+    .input('id', sql.UniqueIdentifier, id)
+    .input('eventId', sql.UniqueIdentifier, eventId)
     .input('attendeeName', sql.NVarChar, attendeeName)
     .input('attendeeEmail', sql.NVarChar, attendeeEmail)
     .query(
-      `INSERT INTO bookings (event_id, attendee_name, attendee_email)
-       OUTPUT INSERTED.id, INSERTED.event_id, INSERTED.attendee_name, INSERTED.attendee_email, INSERTED.created_at
-       VALUES (@eventId, @attendeeName, @attendeeEmail)`
+      `INSERT INTO bookings (id, event_id, attendee_name, attendee_email, origin_cloud)
+       OUTPUT INSERTED.id, INSERTED.event_id, INSERTED.attendee_name, INSERTED.attendee_email, INSERTED.created_at, INSERTED.origin_cloud
+       VALUES (@id, @eventId, @attendeeName, @attendeeEmail, 'azure')`
     );
-  return result.recordset[0];
+  const record = result.recordset[0];
+
+  await replicateToAws('/replicate/bookings', record);
+
+  return record;
 }
 
-module.exports = { createEvent, createBooking };
+// Idempotent insert for records replicated FROM AWS. SQL Server has no
+// native "ON CONFLICT DO NOTHING" - the standard equivalent is checking
+// existence first, or catching the primary-key-violation error. We do the
+// existence check since it's clearer to read and this isn't a hot path.
+async function replicateEvent(record) {
+  const pool = await getPool();
+  const existing = await pool
+    .request()
+    .input('id', sql.UniqueIdentifier, record.id)
+    .query('SELECT id FROM events WHERE id = @id');
+  if (existing.recordset.length > 0) return;
+
+  await pool
+    .request()
+    .input('id', sql.UniqueIdentifier, record.id)
+    .input('title', sql.NVarChar, record.title)
+    .input('eventDate', sql.DateTime, record.event_date)
+    .input('location', sql.NVarChar, record.location)
+    .input('capacity', sql.Int, record.capacity)
+    .input('originCloud', sql.NVarChar, record.origin_cloud || 'aws')
+    .query(
+      `INSERT INTO events (id, title, event_date, location, capacity, origin_cloud)
+       VALUES (@id, @title, @eventDate, @location, @capacity, @originCloud)`
+    );
+}
+
+async function replicateBooking(record) {
+  const pool = await getPool();
+  const existing = await pool
+    .request()
+    .input('id', sql.UniqueIdentifier, record.id)
+    .query('SELECT id FROM bookings WHERE id = @id');
+  if (existing.recordset.length > 0) return;
+
+  await pool
+    .request()
+    .input('id', sql.UniqueIdentifier, record.id)
+    .input('eventId', sql.UniqueIdentifier, record.event_id)
+    .input('attendeeName', sql.NVarChar, record.attendee_name)
+    .input('attendeeEmail', sql.NVarChar, record.attendee_email)
+    .input('createdAt', sql.DateTime, record.created_at)
+    .input('originCloud', sql.NVarChar, record.origin_cloud || 'aws')
+    .query(
+      `INSERT INTO bookings (id, event_id, attendee_name, attendee_email, created_at, origin_cloud)
+       VALUES (@id, @eventId, @attendeeName, @attendeeEmail, @createdAt, @originCloud)`
+    );
+}
+
+module.exports = { createEvent, createBooking, replicateEvent, replicateBooking };

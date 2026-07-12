@@ -1,5 +1,5 @@
 variable "aws_region" {
-  description = "AWS region to deploy into"
+  description = "AWS region to deploy into (paired with Azure southeastasia for geographic parity)"
   type        = string
   default     = "ap-southeast-1"
 }
@@ -26,4 +26,9 @@ variable "project_name" {
   description = "Prefix used for naming resources"
   type        = string
   default     = "event-app"
+}
+
+variable "azure_base_url" {
+  description = "Azure Function App base URL including /api, e.g. https://eventapp-func-zhw36q.azurewebsites.net/api"
+  type        = string
 }

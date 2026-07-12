@@ -1,7 +1,7 @@
 variable "azure_region" {
-  description = "Azure region to deploy into (paired with AWS us-west-1)"
+  description = "Azure region to deploy into (constrained to student subscription's allowed list; paired with AWS ap-southeast-1 for geographic parity)"
   type        = string
-  default     = "West US"
+  default     = "southeastasia"
 }
 
 variable "subscription_id" {
@@ -25,4 +25,9 @@ variable "sql_admin_password" {
   description = "Admin password for Azure SQL Database"
   type        = string
   sensitive   = true
+}
+
+variable "aws_base_url" {
+  description = "AWS API Gateway base URL, e.g. https://l30myjhqlk.execute-api.ap-southeast-1.amazonaws.com"
+  type        = string
 }

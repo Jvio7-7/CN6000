@@ -70,7 +70,7 @@ export default function Home() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          eventId: Number(bookingForm.eventId),
+          eventId: bookingForm.eventId,
           attendeeName: bookingForm.attendeeName,
           attendeeEmail: bookingForm.attendeeEmail,
         }),
@@ -170,11 +170,10 @@ export default function Home() {
               <input
                 id="eventId"
                 required
-                type="number"
-                min="1"
+                type="text"
                 value={bookingForm.eventId}
                 onChange={(e) => setBookingForm({ ...bookingForm, eventId: e.target.value })}
-                placeholder="1"
+                placeholder="a1b2c3d4-... (from the log above)"
               />
             </div>
 

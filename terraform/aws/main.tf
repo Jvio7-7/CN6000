@@ -107,7 +107,8 @@ resource "aws_lambda_function" "create_event" {
 
   environment {
     variables = {
-      DATABASE_URL = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
+      DATABASE_URL   = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
+      AZURE_BASE_URL = var.azure_base_url
     }
   }
 }
@@ -124,7 +125,8 @@ resource "aws_lambda_function" "book_event" {
 
   environment {
     variables = {
-      DATABASE_URL = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
+      DATABASE_URL   = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
+      AZURE_BASE_URL = var.azure_base_url
     }
   }
 }
@@ -138,6 +140,45 @@ resource "aws_lambda_function" "health" {
   role             = aws_iam_role.lambda_exec.arn
   layers           = [aws_lambda_layer_version.db_layer.arn]
   timeout          = 5
+
+  environment {
+    variables = {
+      DATABASE_URL = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
+    }
+  }
+}
+
+# -------------------------------------------------------------------------
+# Replication endpoints - receive writes that originated on Azure and were
+# forwarded here. These never replicate further (one-hop only, no ping-pong).
+# -------------------------------------------------------------------------
+
+resource "aws_lambda_function" "replicate_events" {
+  function_name    = "${var.project_name}-replicate-events"
+  filename         = "${path.module}/../../lambda/replicate-events.zip"
+  source_code_hash = filebase64sha256("${path.module}/../../lambda/replicate-events.zip")
+  handler          = "index.handler"
+  runtime          = "nodejs20.x"
+  role             = aws_iam_role.lambda_exec.arn
+  layers           = [aws_lambda_layer_version.db_layer.arn]
+  timeout          = 10
+
+  environment {
+    variables = {
+      DATABASE_URL = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
+    }
+  }
+}
+
+resource "aws_lambda_function" "replicate_bookings" {
+  function_name    = "${var.project_name}-replicate-bookings"
+  filename         = "${path.module}/../../lambda/replicate-bookings.zip"
+  source_code_hash = filebase64sha256("${path.module}/../../lambda/replicate-bookings.zip")
+  handler          = "index.handler"
+  runtime          = "nodejs20.x"
+  role             = aws_iam_role.lambda_exec.arn
+  layers           = [aws_lambda_layer_version.db_layer.arn]
+  timeout          = 10
 
   environment {
     variables = {
@@ -182,6 +223,20 @@ resource "aws_apigatewayv2_integration" "health" {
   payload_format_version = "2.0"
 }
 
+resource "aws_apigatewayv2_integration" "replicate_events" {
+  api_id                 = aws_apigatewayv2_api.http_api.id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = aws_lambda_function.replicate_events.invoke_arn
+  payload_format_version = "2.0"
+}
+
+resource "aws_apigatewayv2_integration" "replicate_bookings" {
+  api_id                 = aws_apigatewayv2_api.http_api.id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = aws_lambda_function.replicate_bookings.invoke_arn
+  payload_format_version = "2.0"
+}
+
 resource "aws_apigatewayv2_route" "create_event" {
   api_id    = aws_apigatewayv2_api.http_api.id
   route_key = "POST /events"
@@ -198,6 +253,18 @@ resource "aws_apigatewayv2_route" "health" {
   api_id    = aws_apigatewayv2_api.http_api.id
   route_key = "GET /health"
   target    = "integrations/${aws_apigatewayv2_integration.health.id}"
+}
+
+resource "aws_apigatewayv2_route" "replicate_events" {
+  api_id    = aws_apigatewayv2_api.http_api.id
+  route_key = "POST /replicate/events"
+  target    = "integrations/${aws_apigatewayv2_integration.replicate_events.id}"
+}
+
+resource "aws_apigatewayv2_route" "replicate_bookings" {
+  api_id    = aws_apigatewayv2_api.http_api.id
+  route_key = "POST /replicate/bookings"
+  target    = "integrations/${aws_apigatewayv2_integration.replicate_bookings.id}"
 }
 
 resource "aws_lambda_permission" "create_event_apigw" {
@@ -220,6 +287,22 @@ resource "aws_lambda_permission" "health_apigw" {
   statement_id  = "AllowAPIGatewayInvokeHealth"
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.health.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.http_api.execution_arn}/*/*"
+}
+
+resource "aws_lambda_permission" "replicate_events_apigw" {
+  statement_id  = "AllowAPIGatewayInvokeReplicateEvents"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.replicate_events.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.http_api.execution_arn}/*/*"
+}
+
+resource "aws_lambda_permission" "replicate_bookings_apigw" {
+  statement_id  = "AllowAPIGatewayInvokeReplicateBookings"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.replicate_bookings.function_name
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${aws_apigatewayv2_api.http_api.execution_arn}/*/*"
 }
