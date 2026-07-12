@@ -44,11 +44,17 @@ export default function Home() {
     attendeeName: '',
     attendeeEmail: '',
   });
+  const [paymentForm, setPaymentForm] = useState({
+    bookingId: '',
+    amount: '',
+    cardNumber: '',
+  });
   const [log, setLog] = useState<LogEntry[]>([]);
   const [events, setEvents] = useState<EventRecord[]>([]);
   const [loadingEvents, setLoadingEvents] = useState(false);
   const [submittingEvent, setSubmittingEvent] = useState(false);
   const [submittingBooking, setSubmittingBooking] = useState(false);
+  const [submittingPayment, setSubmittingPayment] = useState(false);
 
   const [user, setUser] = useState<UserRecord | null>(null);
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
@@ -192,11 +198,37 @@ export default function Home() {
       pushLog('POST', '/api/bookings', res.status, data);
       if (res.ok) {
         setBookingForm({ eventId: '', attendeeName: '', attendeeEmail: '' });
+        setPaymentForm({ ...paymentForm, bookingId: data.id });
       }
     } catch (err) {
       pushLog('POST', '/api/bookings', 0, { error: 'Network error' });
     } finally {
       setSubmittingBooking(false);
+    }
+  }
+
+  async function handlePayment(e: React.FormEvent) {
+    e.preventDefault();
+    setSubmittingPayment(true);
+    try {
+      const res = await fetch('/api/payments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          bookingId: paymentForm.bookingId,
+          amount: Number(paymentForm.amount),
+          cardNumber: paymentForm.cardNumber,
+        }),
+      });
+      const data = await res.json();
+      pushLog('POST', '/api/payments', res.status, data);
+      if (res.ok) {
+        setPaymentForm({ bookingId: '', amount: '', cardNumber: '' });
+      }
+    } catch (err) {
+      pushLog('POST', '/api/payments', 0, { error: 'Network error' });
+    } finally {
+      setSubmittingPayment(false);
     }
   }
 
@@ -451,6 +483,62 @@ export default function Home() {
             </button>
           </form>
         </div>
+
+        <form className="card paymentCard" onSubmit={handlePayment}>
+          <div className="cardHead">
+            <span className="step">03</span>
+            <h2 className="cardTitle">Pay for booking</h2>
+          </div>
+          <p className="paymentNote">
+            Simulated only — no real payment processor is involved anywhere
+            in this project. A card ending in <code>0000</code> simulates a
+            decline; anything else succeeds.
+          </p>
+
+          <div className="paymentRow">
+            <div className="field">
+              <label htmlFor="paymentBookingId">Booking ID</label>
+              <input
+                id="paymentBookingId"
+                required
+                type="text"
+                value={paymentForm.bookingId}
+                onChange={(e) => setPaymentForm({ ...paymentForm, bookingId: e.target.value })}
+                placeholder="Auto-filled after booking above"
+              />
+            </div>
+
+            <div className="field">
+              <label htmlFor="amount">Amount (USD)</label>
+              <input
+                id="amount"
+                required
+                type="number"
+                step="0.01"
+                min="0.01"
+                value={paymentForm.amount}
+                onChange={(e) => setPaymentForm({ ...paymentForm, amount: e.target.value })}
+                placeholder="49.99"
+              />
+            </div>
+
+            <div className="field">
+              <label htmlFor="cardNumber">Card number (fake)</label>
+              <input
+                id="cardNumber"
+                required
+                type="text"
+                value={paymentForm.cardNumber}
+                onChange={(e) => setPaymentForm({ ...paymentForm, cardNumber: e.target.value })}
+                placeholder="4242 4242 4242 4242"
+              />
+            </div>
+          </div>
+
+          <button className="submit" type="submit" disabled={submittingPayment}>
+            {submittingPayment ? 'Processing…' : 'Pay →'}
+          </button>
+        </form>
 
         <div className="log">
           <p className="logHead">$ response log</p>

@@ -18,6 +18,8 @@ lambda/replicate-users.zip
 lambda/register.zip
 lambda/login.zip
 lambda/me.zip
+lambda/payments.zip
+lambda/replicate-payments.zip
 lambda/bookings.zip
 lambda/health.zip
 lambda/replicate-events.zip

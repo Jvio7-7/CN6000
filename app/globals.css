@@ -253,6 +253,37 @@ h1 {
   cursor: not-allowed;
 }
 
+/* ---------- payment card ---------- */
+
+.paymentCard {
+  margin-bottom: 20px;
+}
+
+.paymentNote {
+  font-size: 13px;
+  color: var(--muted);
+  margin: -8px 0 20px;
+}
+
+.paymentNote code {
+  font-family: var(--font-display);
+  background: var(--paper);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+.paymentRow {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1.5fr;
+  gap: 16px;
+}
+
+@media (max-width: 720px) {
+  .paymentRow {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* ---------- events browser ---------- */
 
 .eventsCard {

@@ -168,6 +168,48 @@ async function replicateUser(record) {
   );
 }
 
+// Simulated payment only - no real processor involved anywhere in this
+// project. A card ending in 0000 simulates a decline (same convention as
+// Stripe's test cards); anything else simulates success. The full card
+// number is never stored or logged, only the last 4 digits.
+async function createPayment({ bookingId, amount, currency, cardNumber }) {
+  const id = crypto.randomUUID();
+  const last4 = cardNumber.slice(-4);
+  const status = last4 === '0000' ? 'declined' : 'completed';
+
+  const db = getPool();
+  const result = await db.query(
+    `INSERT INTO payments (id, booking_id, amount, currency, card_last4, status, origin_cloud)
+     VALUES ($1, $2, $3, $4, $5, $6, 'aws')
+     RETURNING id, booking_id, amount, currency, card_last4, status, created_at, origin_cloud`,
+    [id, bookingId, amount, currency || 'USD', last4, status]
+  );
+  const record = result.rows[0];
+
+  await replicateToAzure('/replicate/payments', record);
+
+  return record;
+}
+
+async function replicatePayment(record) {
+  const db = getPool();
+  await db.query(
+    `INSERT INTO payments (id, booking_id, amount, currency, card_last4, status, created_at, origin_cloud)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+     ON CONFLICT (id) DO NOTHING`,
+    [
+      record.id,
+      record.booking_id,
+      record.amount,
+      record.currency,
+      record.card_last4,
+      record.status,
+      record.created_at,
+      record.origin_cloud || 'azure',
+    ]
+  );
+}
+
 module.exports = {
   createEvent,
   createBooking,
@@ -178,4 +220,6 @@ module.exports = {
   findUserByEmail,
   findUserById,
   replicateUser,
+  createPayment,
+  replicatePayment,
 };

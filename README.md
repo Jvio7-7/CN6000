@@ -404,7 +404,48 @@ Invoke-RestMethod -Uri "<function_app_url>/api/users/me" -Headers @{ Authorizati
 ```
 If both return your user info, sessions genuinely work across both clouds.
 
-## 7. Security note (for the report)
+## 7. Simulated payments
+
+No real payment processor anywhere in this project — a card ending in
+`0000` simulates a decline, anything else succeeds. Same convention
+Stripe's own test cards use. Available both locally (`/api/payments`,
+tied to locally-created bookings) and on both deployed clouds
+(`POST /payments`, replicated like everything else).
+
+**Step A — rebuild and redeploy AWS** (adds `payments` and
+`replicate-payments` Lambda functions):
+```powershell
+.\build-lambda.ps1
+cd terraform\aws
+terraform apply
+```
+
+**Step B — Azure needs no Terraform change** (no new app settings), just
+a republish once the code's in place:
+```powershell
+cd ..\..\azure-functions
+func azure functionapp publish <function_app_name> --javascript
+```
+
+**Step C — reset both databases again** (new `payments` table):
+```powershell
+cd ..\terraform\aws
+$env:PGPASSWORD="<your db password>"
+& "C:\Program Files\PostgreSQL\16\bin\psql.exe" -h <rds_endpoint> -U eventappadmin -d eventdb -f ..\..\sql\schema-postgres.sql
+
+cd ..\..
+sqlcmd -S <sql_server_fqdn> -d eventdb -U eventappadmin -P "<your sql password>" -i sql\schema-mssql.sql
+```
+
+**Step D — test on the deployed cloud** (needs a real `booking_id` that
+already exists there - create an event and booking first if you don't
+have one):
+```powershell
+Invoke-RestMethod -Uri "<api_endpoint>/payments" -Method Post -ContentType "application/json" -Body '{"bookingId":"<a real booking id>","amount":49.99,"cardNumber":"4242424242424242"}'
+```
+Try a card ending in `0000` too, to see the simulated decline (`402`).
+
+## 8. Security note (for the report)
 
 RDS is set to `publicly_accessible = true` with inbound open on port 5432.
 This is intentional for coursework simplicity — it avoids putting Lambda in
@@ -418,7 +459,7 @@ your own machine's current IP for direct schema access. Same underlying
 tradeoff as the AWS side, different mechanism — both worth a sentence or
 two in your Design or Testing chapter.
 
-## 8. Tearing down (to avoid burning through credits)
+## 9. Tearing down (to avoid burning through credits)
 
 When you're done experimenting for the day:
 

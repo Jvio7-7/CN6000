@@ -10,6 +10,7 @@
 -- it's meant to be re-run whenever the schema changes, not just once.
 -- There's no production data here to preserve.
 
+DROP TABLE IF EXISTS payments;
 DROP TABLE IF EXISTS bookings;
 DROP TABLE IF EXISTS events;
 DROP TABLE IF EXISTS users;
@@ -37,6 +38,22 @@ CREATE TABLE bookings (
   event_id UUID NOT NULL REFERENCES events(id),
   attendee_name VARCHAR(255) NOT NULL,
   attendee_email VARCHAR(255) NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  origin_cloud VARCHAR(10) NOT NULL DEFAULT 'aws'
+);
+
+-- Simulated payments only - no real payment processor is integrated
+-- anywhere in this project (deliberately: real card processing would be
+-- inappropriate scope and a security liability for coursework). A card
+-- number ending in 0000 simulates a declined payment, otherwise it
+-- succeeds - the same convention Stripe's own test cards use.
+CREATE TABLE payments (
+  id UUID PRIMARY KEY,
+  booking_id UUID NOT NULL REFERENCES bookings(id),
+  amount NUMERIC(10, 2) NOT NULL,
+  currency VARCHAR(3) NOT NULL DEFAULT 'USD',
+  card_last4 VARCHAR(4) NOT NULL,
+  status VARCHAR(20) NOT NULL,
   created_at TIMESTAMP NOT NULL DEFAULT NOW(),
   origin_cloud VARCHAR(10) NOT NULL DEFAULT 'aws'
 );

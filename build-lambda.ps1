@@ -51,4 +51,12 @@ Write-Host "Zipping me function..."
 if (Test-Path lambda/me.zip) { Remove-Item lambda/me.zip }
 Compress-Archive -Path lambda/me/index.js -DestinationPath lambda/me.zip
 
+Write-Host "Zipping payments function..."
+if (Test-Path lambda/payments.zip) { Remove-Item lambda/payments.zip }
+Compress-Archive -Path lambda/payments/index.js -DestinationPath lambda/payments.zip
+
+Write-Host "Zipping replicate-payments function..."
+if (Test-Path lambda/replicate-payments.zip) { Remove-Item lambda/replicate-payments.zip }
+Compress-Archive -Path lambda/replicate-payments/index.js -DestinationPath lambda/replicate-payments.zip
+
 Write-Host "Done. All lambda zip files are ready for Terraform."

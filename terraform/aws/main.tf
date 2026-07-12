@@ -66,7 +66,7 @@ resource "aws_lambda_layer_version" "db_layer" {
   layer_name          = "${var.project_name}-db-layer"
   filename            = "${path.module}/../../lambda/layer.zip"
   source_code_hash    = filebase64sha256("${path.module}/../../lambda/layer.zip")
-  compatible_runtimes = ["nodejs20.x"]
+  compatible_runtimes = ["nodejs22.x"]
 }
 
 # -------------------------------------------------------------------------
@@ -100,7 +100,7 @@ resource "aws_lambda_function" "create_event" {
   filename         = "${path.module}/../../lambda/events.zip"
   source_code_hash = filebase64sha256("${path.module}/../../lambda/events.zip")
   handler          = "index.handler"
-  runtime          = "nodejs20.x"
+  runtime          = "nodejs22.x"
   role             = aws_iam_role.lambda_exec.arn
   layers           = [aws_lambda_layer_version.db_layer.arn]
   timeout          = 10
@@ -118,7 +118,7 @@ resource "aws_lambda_function" "book_event" {
   filename         = "${path.module}/../../lambda/bookings.zip"
   source_code_hash = filebase64sha256("${path.module}/../../lambda/bookings.zip")
   handler          = "index.handler"
-  runtime          = "nodejs20.x"
+  runtime          = "nodejs22.x"
   role             = aws_iam_role.lambda_exec.arn
   layers           = [aws_lambda_layer_version.db_layer.arn]
   timeout          = 10
@@ -136,7 +136,7 @@ resource "aws_lambda_function" "list_events" {
   filename         = "${path.module}/../../lambda/list-events.zip"
   source_code_hash = filebase64sha256("${path.module}/../../lambda/list-events.zip")
   handler          = "index.handler"
-  runtime          = "nodejs20.x"
+  runtime          = "nodejs22.x"
   role             = aws_iam_role.lambda_exec.arn
   layers           = [aws_lambda_layer_version.db_layer.arn]
   timeout          = 10
@@ -153,7 +153,7 @@ resource "aws_lambda_function" "health" {
   filename         = "${path.module}/../../lambda/health.zip"
   source_code_hash = filebase64sha256("${path.module}/../../lambda/health.zip")
   handler          = "index.handler"
-  runtime          = "nodejs20.x"
+  runtime          = "nodejs22.x"
   role             = aws_iam_role.lambda_exec.arn
   layers           = [aws_lambda_layer_version.db_layer.arn]
   timeout          = 5
@@ -175,7 +175,7 @@ resource "aws_lambda_function" "replicate_events" {
   filename         = "${path.module}/../../lambda/replicate-events.zip"
   source_code_hash = filebase64sha256("${path.module}/../../lambda/replicate-events.zip")
   handler          = "index.handler"
-  runtime          = "nodejs20.x"
+  runtime          = "nodejs22.x"
   role             = aws_iam_role.lambda_exec.arn
   layers           = [aws_lambda_layer_version.db_layer.arn]
   timeout          = 10
@@ -192,7 +192,7 @@ resource "aws_lambda_function" "replicate_bookings" {
   filename         = "${path.module}/../../lambda/replicate-bookings.zip"
   source_code_hash = filebase64sha256("${path.module}/../../lambda/replicate-bookings.zip")
   handler          = "index.handler"
-  runtime          = "nodejs20.x"
+  runtime          = "nodejs22.x"
   role             = aws_iam_role.lambda_exec.arn
   layers           = [aws_lambda_layer_version.db_layer.arn]
   timeout          = 10
@@ -209,7 +209,7 @@ resource "aws_lambda_function" "replicate_users" {
   filename         = "${path.module}/../../lambda/replicate-users.zip"
   source_code_hash = filebase64sha256("${path.module}/../../lambda/replicate-users.zip")
   handler          = "index.handler"
-  runtime          = "nodejs20.x"
+  runtime          = "nodejs22.x"
   role             = aws_iam_role.lambda_exec.arn
   layers           = [aws_lambda_layer_version.db_layer.arn]
   timeout          = 10
@@ -232,7 +232,7 @@ resource "aws_lambda_function" "register" {
   filename         = "${path.module}/../../lambda/register.zip"
   source_code_hash = filebase64sha256("${path.module}/../../lambda/register.zip")
   handler          = "index.handler"
-  runtime          = "nodejs20.x"
+  runtime          = "nodejs22.x"
   role             = aws_iam_role.lambda_exec.arn
   layers           = [aws_lambda_layer_version.db_layer.arn]
   timeout          = 10
@@ -251,7 +251,7 @@ resource "aws_lambda_function" "login" {
   filename         = "${path.module}/../../lambda/login.zip"
   source_code_hash = filebase64sha256("${path.module}/../../lambda/login.zip")
   handler          = "index.handler"
-  runtime          = "nodejs20.x"
+  runtime          = "nodejs22.x"
   role             = aws_iam_role.lambda_exec.arn
   layers           = [aws_lambda_layer_version.db_layer.arn]
   timeout          = 10
@@ -269,7 +269,7 @@ resource "aws_lambda_function" "me" {
   filename         = "${path.module}/../../lambda/me.zip"
   source_code_hash = filebase64sha256("${path.module}/../../lambda/me.zip")
   handler          = "index.handler"
-  runtime          = "nodejs20.x"
+  runtime          = "nodejs22.x"
   role             = aws_iam_role.lambda_exec.arn
   layers           = [aws_lambda_layer_version.db_layer.arn]
   timeout          = 10
@@ -278,6 +278,46 @@ resource "aws_lambda_function" "me" {
     variables = {
       DATABASE_URL = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
       JWT_SECRET   = var.jwt_secret
+    }
+  }
+}
+
+# -------------------------------------------------------------------------
+# Simulated payments - no real processor involved. See sql/schema-postgres.sql
+# for the decline-simulation convention.
+# -------------------------------------------------------------------------
+
+resource "aws_lambda_function" "payments" {
+  function_name    = "${var.project_name}-payments"
+  filename         = "${path.module}/../../lambda/payments.zip"
+  source_code_hash = filebase64sha256("${path.module}/../../lambda/payments.zip")
+  handler          = "index.handler"
+  runtime          = "nodejs22.x"
+  role             = aws_iam_role.lambda_exec.arn
+  layers           = [aws_lambda_layer_version.db_layer.arn]
+  timeout          = 10
+
+  environment {
+    variables = {
+      DATABASE_URL   = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
+      AZURE_BASE_URL = var.azure_base_url
+    }
+  }
+}
+
+resource "aws_lambda_function" "replicate_payments" {
+  function_name    = "${var.project_name}-replicate-payments"
+  filename         = "${path.module}/../../lambda/replicate-payments.zip"
+  source_code_hash = filebase64sha256("${path.module}/../../lambda/replicate-payments.zip")
+  handler          = "index.handler"
+  runtime          = "nodejs22.x"
+  role             = aws_iam_role.lambda_exec.arn
+  layers           = [aws_lambda_layer_version.db_layer.arn]
+  timeout          = 10
+
+  environment {
+    variables = {
+      DATABASE_URL = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
     }
   }
 }
@@ -367,6 +407,20 @@ resource "aws_apigatewayv2_integration" "me" {
   payload_format_version = "2.0"
 }
 
+resource "aws_apigatewayv2_integration" "payments" {
+  api_id                 = aws_apigatewayv2_api.http_api.id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = aws_lambda_function.payments.invoke_arn
+  payload_format_version = "2.0"
+}
+
+resource "aws_apigatewayv2_integration" "replicate_payments" {
+  api_id                 = aws_apigatewayv2_api.http_api.id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = aws_lambda_function.replicate_payments.invoke_arn
+  payload_format_version = "2.0"
+}
+
 resource "aws_apigatewayv2_route" "create_event" {
   api_id    = aws_apigatewayv2_api.http_api.id
   route_key = "POST /events"
@@ -425,6 +479,18 @@ resource "aws_apigatewayv2_route" "me" {
   api_id    = aws_apigatewayv2_api.http_api.id
   route_key = "GET /users/me"
   target    = "integrations/${aws_apigatewayv2_integration.me.id}"
+}
+
+resource "aws_apigatewayv2_route" "payments" {
+  api_id    = aws_apigatewayv2_api.http_api.id
+  route_key = "POST /payments"
+  target    = "integrations/${aws_apigatewayv2_integration.payments.id}"
+}
+
+resource "aws_apigatewayv2_route" "replicate_payments" {
+  api_id    = aws_apigatewayv2_api.http_api.id
+  route_key = "POST /replicate/payments"
+  target    = "integrations/${aws_apigatewayv2_integration.replicate_payments.id}"
 }
 
 resource "aws_lambda_permission" "create_event_apigw" {
@@ -503,6 +569,22 @@ resource "aws_lambda_permission" "me_apigw" {
   statement_id  = "AllowAPIGatewayInvokeMe"
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.me.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.http_api.execution_arn}/*/*"
+}
+
+resource "aws_lambda_permission" "payments_apigw" {
+  statement_id  = "AllowAPIGatewayInvokePayments"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.payments.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.http_api.execution_arn}/*/*"
+}
+
+resource "aws_lambda_permission" "replicate_payments_apigw" {
+  statement_id  = "AllowAPIGatewayInvokeReplicatePayments"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.replicate_payments.function_name
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${aws_apigatewayv2_api.http_api.execution_arn}/*/*"
 }

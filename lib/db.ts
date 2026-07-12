@@ -130,3 +130,47 @@ export async function listEvents() {
   );
   return result.rows;
 }
+
+export interface PaymentInput {
+  bookingId: string;
+  amount: number;
+  currency?: string;
+  cardNumber: string;
+}
+
+// Same simulated-decline convention as the deployed Lambda/Azure Function
+// versions: a card ending in 0000 simulates a decline. No real payment
+// processor anywhere in this project.
+export async function createPayment(data: PaymentInput) {
+  const id = randomUUID();
+  const last4 = data.cardNumber.slice(-4);
+  const status = last4 === '0000' ? 'declined' : 'completed';
+  const currency = data.currency || 'USD';
+
+  if (DB_TYPE === 'mssql') {
+    const pool = await getMssqlPool();
+    const result = await pool
+      .request()
+      .input('id', sql.UniqueIdentifier, id)
+      .input('bookingId', sql.UniqueIdentifier, data.bookingId)
+      .input('amount', sql.Decimal(10, 2), data.amount)
+      .input('currency', sql.NVarChar, currency)
+      .input('cardLast4', sql.NVarChar, last4)
+      .input('status', sql.NVarChar, status)
+      .query(
+        `INSERT INTO payments (id, booking_id, amount, currency, card_last4, status, origin_cloud)
+         OUTPUT INSERTED.id, INSERTED.booking_id, INSERTED.amount, INSERTED.currency, INSERTED.card_last4, INSERTED.status, INSERTED.created_at
+         VALUES (@id, @bookingId, @amount, @currency, @cardLast4, @status, 'local')`
+      );
+    return result.recordset[0];
+  }
+
+  const pool = getPgPool();
+  const result = await pool.query(
+    `INSERT INTO payments (id, booking_id, amount, currency, card_last4, status, origin_cloud)
+     VALUES ($1, $2, $3, $4, $5, $6, 'local')
+     RETURNING id, booking_id, amount, currency, card_last4, status, created_at`,
+    [id, data.bookingId, data.amount, currency, last4, status]
+  );
+  return result.rows[0];
+}

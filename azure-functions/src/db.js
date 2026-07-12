@@ -212,6 +212,56 @@ async function replicateUser(record) {
     );
 }
 
+async function createPayment({ bookingId, amount, currency, cardNumber }) {
+  const id = crypto.randomUUID();
+  const last4 = cardNumber.slice(-4);
+  const status = last4 === '0000' ? 'declined' : 'completed';
+
+  const pool = await getPool();
+  const result = await pool
+    .request()
+    .input('id', sql.UniqueIdentifier, id)
+    .input('bookingId', sql.UniqueIdentifier, bookingId)
+    .input('amount', sql.Decimal(10, 2), amount)
+    .input('currency', sql.NVarChar, currency || 'USD')
+    .input('cardLast4', sql.NVarChar, last4)
+    .input('status', sql.NVarChar, status)
+    .query(
+      `INSERT INTO payments (id, booking_id, amount, currency, card_last4, status, origin_cloud)
+       OUTPUT INSERTED.id, INSERTED.booking_id, INSERTED.amount, INSERTED.currency, INSERTED.card_last4, INSERTED.status, INSERTED.created_at, INSERTED.origin_cloud
+       VALUES (@id, @bookingId, @amount, @currency, @cardLast4, @status, 'azure')`
+    );
+  const record = result.recordset[0];
+
+  await replicateToAws('/replicate/payments', record);
+
+  return record;
+}
+
+async function replicatePayment(record) {
+  const pool = await getPool();
+  const existing = await pool
+    .request()
+    .input('id', sql.UniqueIdentifier, record.id)
+    .query('SELECT id FROM payments WHERE id = @id');
+  if (existing.recordset.length > 0) return;
+
+  await pool
+    .request()
+    .input('id', sql.UniqueIdentifier, record.id)
+    .input('bookingId', sql.UniqueIdentifier, record.booking_id)
+    .input('amount', sql.Decimal(10, 2), record.amount)
+    .input('currency', sql.NVarChar, record.currency)
+    .input('cardLast4', sql.NVarChar, record.card_last4)
+    .input('status', sql.NVarChar, record.status)
+    .input('createdAt', sql.DateTime, record.created_at)
+    .input('originCloud', sql.NVarChar, record.origin_cloud || 'aws')
+    .query(
+      `INSERT INTO payments (id, booking_id, amount, currency, card_last4, status, created_at, origin_cloud)
+       VALUES (@id, @bookingId, @amount, @currency, @cardLast4, @status, @createdAt, @originCloud)`
+    );
+}
+
 module.exports = {
   createEvent,
   createBooking,
@@ -222,4 +272,6 @@ module.exports = {
   findUserByEmail,
   findUserById,
   replicateUser,
+  createPayment,
+  replicatePayment,
 };
