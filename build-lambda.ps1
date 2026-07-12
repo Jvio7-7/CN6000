@@ -1,5 +1,6 @@
 # Run this from the event-app root folder before `terraform apply`.
-# It installs the layer's dependencies (pg) and zips everything Lambda needs.
+# It installs the layer's dependencies (pg, bcryptjs, jsonwebtoken) and
+# zips everything Lambda needs.
 
 Write-Host "Installing Lambda layer dependencies..."
 Push-Location lambda/layer/nodejs
@@ -33,5 +34,21 @@ Compress-Archive -Path lambda/replicate-events/index.js -DestinationPath lambda/
 Write-Host "Zipping replicate-bookings function..."
 if (Test-Path lambda/replicate-bookings.zip) { Remove-Item lambda/replicate-bookings.zip }
 Compress-Archive -Path lambda/replicate-bookings/index.js -DestinationPath lambda/replicate-bookings.zip
+
+Write-Host "Zipping replicate-users function..."
+if (Test-Path lambda/replicate-users.zip) { Remove-Item lambda/replicate-users.zip }
+Compress-Archive -Path lambda/replicate-users/index.js -DestinationPath lambda/replicate-users.zip
+
+Write-Host "Zipping register function..."
+if (Test-Path lambda/register.zip) { Remove-Item lambda/register.zip }
+Compress-Archive -Path lambda/register/index.js -DestinationPath lambda/register.zip
+
+Write-Host "Zipping login function..."
+if (Test-Path lambda/login.zip) { Remove-Item lambda/login.zip }
+Compress-Archive -Path lambda/login/index.js -DestinationPath lambda/login.zip
+
+Write-Host "Zipping me function..."
+if (Test-Path lambda/me.zip) { Remove-Item lambda/me.zip }
+Compress-Archive -Path lambda/me/index.js -DestinationPath lambda/me.zip
 
 Write-Host "Done. All lambda zip files are ready for Terraform."

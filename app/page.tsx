@@ -18,6 +18,18 @@ interface EventRecord {
   capacity: number;
 }
 
+interface UserRecord {
+  id: string;
+  name: string;
+  email: string;
+  origin_cloud?: string;
+}
+
+// User auth calls a deployed cloud endpoint directly rather than a local
+// Next.js API route (deliberate scope decision - see README). Point this
+// at your AWS API Gateway or Azure Function App URL via env var.
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || '';
+
 let logId = 0;
 
 export default function Home() {
@@ -37,6 +49,13 @@ export default function Home() {
   const [loadingEvents, setLoadingEvents] = useState(false);
   const [submittingEvent, setSubmittingEvent] = useState(false);
   const [submittingBooking, setSubmittingBooking] = useState(false);
+
+  const [user, setUser] = useState<UserRecord | null>(null);
+  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+  const [authForm, setAuthForm] = useState({ name: '', email: '', password: '' });
+  const [authError, setAuthError] = useState('');
+  const [authLoading, setAuthLoading] = useState(false);
+  const [checkingSession, setCheckingSession] = useState(true);
 
   function pushLog(method: string, route: string, status: number, body: unknown) {
     logId += 1;
@@ -59,13 +78,74 @@ export default function Home() {
     }
   }
 
+  async function loadSession() {
+    const token = localStorage.getItem('token');
+    if (!token || !API_BASE_URL) {
+      setCheckingSession(false);
+      return;
+    }
+    try {
+      const res = await fetch(`${API_BASE_URL}/users/me`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        setUser(await res.json());
+      } else {
+        localStorage.removeItem('token');
+      }
+    } catch (err) {
+      // Network error checking session - leave logged out, don't crash the page
+    } finally {
+      setCheckingSession(false);
+    }
+  }
+
   useEffect(() => {
     refreshEvents();
+    loadSession();
   }, []);
 
   function bookThisEvent(id: string) {
     setBookingForm({ ...bookingForm, eventId: id });
     document.getElementById('attendeeName')?.focus();
+  }
+
+  async function handleAuthSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setAuthError('');
+    setAuthLoading(true);
+    const path = authMode === 'register' ? '/users/register' : '/users/login';
+    const payload =
+      authMode === 'register'
+        ? authForm
+        : { email: authForm.email, password: authForm.password };
+
+    try {
+      const res = await fetch(`${API_BASE_URL}${path}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      pushLog('POST', path, res.status, data);
+
+      if (res.ok) {
+        localStorage.setItem('token', data.token);
+        setUser(data.user);
+        setAuthForm({ name: '', email: '', password: '' });
+      } else {
+        setAuthError(data.error || 'Something went wrong');
+      }
+    } catch (err) {
+      setAuthError('Network error - check NEXT_PUBLIC_API_BASE_URL is set correctly');
+    } finally {
+      setAuthLoading(false);
+    }
+  }
+
+  function handleLogout() {
+    localStorage.removeItem('token');
+    setUser(null);
   }
 
   async function handleCreateEvent(e: React.FormEvent) {
@@ -123,16 +203,111 @@ export default function Home() {
   return (
     <main className="page">
       <div className="shell">
-        <p className="eyebrow">
-          EVENT-APP <strong>//</strong> multi-cloud serverless booking service
-        </p>
-        <h1>Event Booking</h1>
+        <div className="topBar">
+          <div>
+            <p className="eyebrow">
+              EVENT-APP <strong>//</strong> multi-cloud serverless booking service
+            </p>
+            <h1>Event Booking</h1>
+          </div>
+
+          {!checkingSession && (
+            <div className="account">
+              {user ? (
+                <>
+                  <span className="accountInfo">
+                    {user.name} · <span className="accountEmail">{user.email}</span>
+                    {user.origin_cloud && (
+                      <span className="originTag">{user.origin_cloud}</span>
+                    )}
+                  </span>
+                  <button className="logoutBtn" onClick={handleLogout}>
+                    Log out
+                  </button>
+                </>
+              ) : (
+                <span className="accountInfo muted">Not signed in</span>
+              )}
+            </div>
+          )}
+        </div>
+
         <p className="subhead">
           Two-step flow: create an event, then book a slot against its ID.
           Every request below hits the live API and the raw response is
           logged underneath, same as the requests running against AWS
           Lambda and Azure Functions in the deployed environments.
         </p>
+
+        {!checkingSession && !user && (
+          <form className="card authCard" onSubmit={handleAuthSubmit}>
+            <div className="cardHead">
+              <h2 className="cardTitle">
+                {authMode === 'login' ? 'Log in' : 'Create an account'}
+              </h2>
+              <button
+                type="button"
+                className="refreshBtn"
+                onClick={() => {
+                  setAuthMode(authMode === 'login' ? 'register' : 'login');
+                  setAuthError('');
+                }}
+              >
+                {authMode === 'login' ? 'Need an account? Sign up' : 'Have an account? Log in'}
+              </button>
+            </div>
+
+            {authMode === 'register' && (
+              <div className="field">
+                <label htmlFor="authName">Name</label>
+                <input
+                  id="authName"
+                  required
+                  value={authForm.name}
+                  onChange={(e) => setAuthForm({ ...authForm, name: e.target.value })}
+                  placeholder="Jin"
+                />
+              </div>
+            )}
+
+            <div className="field">
+              <label htmlFor="authEmail">Email</label>
+              <input
+                id="authEmail"
+                required
+                type="email"
+                value={authForm.email}
+                onChange={(e) => setAuthForm({ ...authForm, email: e.target.value })}
+                placeholder="jin@example.com"
+              />
+            </div>
+
+            <div className="field">
+              <label htmlFor="authPassword">Password</label>
+              <input
+                id="authPassword"
+                required
+                type="password"
+                minLength={8}
+                value={authForm.password}
+                onChange={(e) => setAuthForm({ ...authForm, password: e.target.value })}
+                placeholder="At least 8 characters"
+              />
+            </div>
+
+            {authError && <p className="authError">{authError}</p>}
+            {!API_BASE_URL && (
+              <p className="authError">
+                NEXT_PUBLIC_API_BASE_URL isn't set in .env.local - auth calls
+                have nowhere to go.
+              </p>
+            )}
+
+            <button className="submit" type="submit" disabled={authLoading}>
+              {authLoading ? 'Please wait…' : authMode === 'login' ? 'Log in →' : 'Sign up →'}
+            </button>
+          </form>
+        )}
 
         <div className="card eventsCard">
           <div className="cardHead">

@@ -8,6 +8,8 @@
   },
   "dependencies": {
     "@azure/functions": "^4.5.0",
-    "mssql": "^11.0.1"
+    "mssql": "^11.0.1",
+    "bcryptjs": "^2.4.3",
+    "jsonwebtoken": "^9.0.2"
   }
 }

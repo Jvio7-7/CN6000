@@ -204,6 +204,84 @@ resource "aws_lambda_function" "replicate_bookings" {
   }
 }
 
+resource "aws_lambda_function" "replicate_users" {
+  function_name    = "${var.project_name}-replicate-users"
+  filename         = "${path.module}/../../lambda/replicate-users.zip"
+  source_code_hash = filebase64sha256("${path.module}/../../lambda/replicate-users.zip")
+  handler          = "index.handler"
+  runtime          = "nodejs20.x"
+  role             = aws_iam_role.lambda_exec.arn
+  layers           = [aws_lambda_layer_version.db_layer.arn]
+  timeout          = 10
+
+  environment {
+    variables = {
+      DATABASE_URL = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
+    }
+  }
+}
+
+# -------------------------------------------------------------------------
+# User accounts - registration, login, and the "me" endpoint. JWT_SECRET
+# must match terraform/azure's value exactly so a token issued by either
+# cloud is valid on both.
+# -------------------------------------------------------------------------
+
+resource "aws_lambda_function" "register" {
+  function_name    = "${var.project_name}-register"
+  filename         = "${path.module}/../../lambda/register.zip"
+  source_code_hash = filebase64sha256("${path.module}/../../lambda/register.zip")
+  handler          = "index.handler"
+  runtime          = "nodejs20.x"
+  role             = aws_iam_role.lambda_exec.arn
+  layers           = [aws_lambda_layer_version.db_layer.arn]
+  timeout          = 10
+
+  environment {
+    variables = {
+      DATABASE_URL   = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
+      AZURE_BASE_URL = var.azure_base_url
+      JWT_SECRET     = var.jwt_secret
+    }
+  }
+}
+
+resource "aws_lambda_function" "login" {
+  function_name    = "${var.project_name}-login"
+  filename         = "${path.module}/../../lambda/login.zip"
+  source_code_hash = filebase64sha256("${path.module}/../../lambda/login.zip")
+  handler          = "index.handler"
+  runtime          = "nodejs20.x"
+  role             = aws_iam_role.lambda_exec.arn
+  layers           = [aws_lambda_layer_version.db_layer.arn]
+  timeout          = 10
+
+  environment {
+    variables = {
+      DATABASE_URL = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
+      JWT_SECRET   = var.jwt_secret
+    }
+  }
+}
+
+resource "aws_lambda_function" "me" {
+  function_name    = "${var.project_name}-me"
+  filename         = "${path.module}/../../lambda/me.zip"
+  source_code_hash = filebase64sha256("${path.module}/../../lambda/me.zip")
+  handler          = "index.handler"
+  runtime          = "nodejs20.x"
+  role             = aws_iam_role.lambda_exec.arn
+  layers           = [aws_lambda_layer_version.db_layer.arn]
+  timeout          = 10
+
+  environment {
+    variables = {
+      DATABASE_URL = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
+      JWT_SECRET   = var.jwt_secret
+    }
+  }
+}
+
 # -------------------------------------------------------------------------
 # API Gateway (HTTP API) — routes requests to the two Lambda functions
 # -------------------------------------------------------------------------
@@ -261,6 +339,34 @@ resource "aws_apigatewayv2_integration" "replicate_bookings" {
   payload_format_version = "2.0"
 }
 
+resource "aws_apigatewayv2_integration" "replicate_users" {
+  api_id                 = aws_apigatewayv2_api.http_api.id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = aws_lambda_function.replicate_users.invoke_arn
+  payload_format_version = "2.0"
+}
+
+resource "aws_apigatewayv2_integration" "register" {
+  api_id                 = aws_apigatewayv2_api.http_api.id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = aws_lambda_function.register.invoke_arn
+  payload_format_version = "2.0"
+}
+
+resource "aws_apigatewayv2_integration" "login" {
+  api_id                 = aws_apigatewayv2_api.http_api.id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = aws_lambda_function.login.invoke_arn
+  payload_format_version = "2.0"
+}
+
+resource "aws_apigatewayv2_integration" "me" {
+  api_id                 = aws_apigatewayv2_api.http_api.id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = aws_lambda_function.me.invoke_arn
+  payload_format_version = "2.0"
+}
+
 resource "aws_apigatewayv2_route" "create_event" {
   api_id    = aws_apigatewayv2_api.http_api.id
   route_key = "POST /events"
@@ -295,6 +401,30 @@ resource "aws_apigatewayv2_route" "replicate_bookings" {
   api_id    = aws_apigatewayv2_api.http_api.id
   route_key = "POST /replicate/bookings"
   target    = "integrations/${aws_apigatewayv2_integration.replicate_bookings.id}"
+}
+
+resource "aws_apigatewayv2_route" "replicate_users" {
+  api_id    = aws_apigatewayv2_api.http_api.id
+  route_key = "POST /replicate/users"
+  target    = "integrations/${aws_apigatewayv2_integration.replicate_users.id}"
+}
+
+resource "aws_apigatewayv2_route" "register" {
+  api_id    = aws_apigatewayv2_api.http_api.id
+  route_key = "POST /users/register"
+  target    = "integrations/${aws_apigatewayv2_integration.register.id}"
+}
+
+resource "aws_apigatewayv2_route" "login" {
+  api_id    = aws_apigatewayv2_api.http_api.id
+  route_key = "POST /users/login"
+  target    = "integrations/${aws_apigatewayv2_integration.login.id}"
+}
+
+resource "aws_apigatewayv2_route" "me" {
+  api_id    = aws_apigatewayv2_api.http_api.id
+  route_key = "GET /users/me"
+  target    = "integrations/${aws_apigatewayv2_integration.me.id}"
 }
 
 resource "aws_lambda_permission" "create_event_apigw" {
@@ -341,6 +471,38 @@ resource "aws_lambda_permission" "replicate_bookings_apigw" {
   statement_id  = "AllowAPIGatewayInvokeReplicateBookings"
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.replicate_bookings.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.http_api.execution_arn}/*/*"
+}
+
+resource "aws_lambda_permission" "replicate_users_apigw" {
+  statement_id  = "AllowAPIGatewayInvokeReplicateUsers"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.replicate_users.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.http_api.execution_arn}/*/*"
+}
+
+resource "aws_lambda_permission" "register_apigw" {
+  statement_id  = "AllowAPIGatewayInvokeRegister"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.register.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.http_api.execution_arn}/*/*"
+}
+
+resource "aws_lambda_permission" "login_apigw" {
+  statement_id  = "AllowAPIGatewayInvokeLogin"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.login.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.http_api.execution_arn}/*/*"
+}
+
+resource "aws_lambda_permission" "me_apigw" {
+  statement_id  = "AllowAPIGatewayInvokeMe"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.me.function_name
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${aws_apigatewayv2_api.http_api.execution_arn}/*/*"
 }

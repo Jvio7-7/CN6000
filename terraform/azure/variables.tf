@@ -31,3 +31,9 @@ variable "aws_base_url" {
   description = "AWS API Gateway base URL, e.g. https://l30myjhqlk.execute-api.ap-southeast-1.amazonaws.com"
   type        = string
 }
+
+variable "jwt_secret" {
+  description = "Shared secret for signing/verifying JWTs - MUST match the value used in terraform/aws exactly, so tokens issued by either cloud validate on both"
+  type        = string
+  sensitive   = true
+}

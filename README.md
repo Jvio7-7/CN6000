@@ -319,7 +319,92 @@ You should see the event with `origin_cloud = aws` present in the Azure
 database too — proof the replication call worked, not just the local
 write.
 
-## 6. Security note (for the report)
+## 6. User accounts (register, login, JWT sessions)
+
+Password-based auth, replicated across both clouds like events and
+bookings. The key design point: **JWT_SECRET must be identical on both
+AWS and Azure** - that's what lets a token issued by one cloud validate
+on the other, so a user's session survives even if Route 53 sends their
+next request to a different cloud than the one that logged them in.
+
+**Step A — generate a shared secret** (do this once, use the same value
+everywhere):
+```powershell
+python3 -c "import secrets; print(secrets.token_hex(32))"
+```
+(No Python? Any 64-character random hex string works - openssl rand -hex 32 works too.)
+
+**Step B — add it to both tfvars files**, along with the values you
+already have:
+
+`terraform\aws\terraform.tfvars`:
+```hcl
+jwt_secret = "<paste the generated value>"
+```
+
+`terraform\azure\terraform.tfvars`:
+```hcl
+jwt_secret = "<the exact same value>"
+```
+
+**Step C — rebuild and redeploy AWS** (adds four new Lambda functions:
+`register`, `login`, `me`, `replicate-users`):
+```powershell
+.\build-lambda.ps1
+cd terraform\aws
+terraform apply
+```
+
+**Step D — redeploy Azure infrastructure** (adds `JWT_SECRET` app setting):
+```powershell
+cd ..\azure
+terraform apply
+```
+
+**Step E — reset both databases again** (schema changed - new `users`
+table):
+```powershell
+cd ..\aws
+$env:PGPASSWORD="<your db password>"
+& "C:\Program Files\PostgreSQL\16\bin\psql.exe" -h <rds_endpoint> -U eventappadmin -d eventdb -f ..\..\sql\schema-postgres.sql
+
+cd ..\..
+sqlcmd -S <sql_server_fqdn> -d eventdb -U eventappadmin -P "<your sql password>" -i sql\schema-mssql.sql
+```
+
+**Step F — republish Azure Functions code** (adds `register`, `login`,
+`me`, `replicateUser`):
+```powershell
+cd azure-functions
+func azure functionapp publish <function_app_name> --javascript
+```
+
+**Step G — point the local frontend at a deployed endpoint.** Auth isn't
+implemented as a local Next.js API route (it always calls a real deployed
+cloud) - add this to `.env.local`:
+```
+NEXT_PUBLIC_API_BASE_URL=<your api_endpoint, e.g. https://l30myjhqlk.execute-api.ap-southeast-1.amazonaws.com>
+```
+Restart `npm run dev` after editing `.env.local` for the change to apply.
+
+**Step H — test registration and login:**
+```powershell
+Invoke-RestMethod -Uri "<api_endpoint>/users/register" -Method Post -ContentType "application/json" -Body '{"name":"Jin","email":"jin@example.com","password":"testpass123"}'
+```
+This returns a `user` object and a `token`. Test the protected endpoint
+with that token:
+```powershell
+$token = "<paste the token from above>"
+Invoke-RestMethod -Uri "<api_endpoint>/users/me" -Headers @{ Authorization = "Bearer $token" }
+```
+Then confirm the *same* token works against the *other* cloud - this is
+the real test of the shared-secret design:
+```powershell
+Invoke-RestMethod -Uri "<function_app_url>/api/users/me" -Headers @{ Authorization = "Bearer $token" }
+```
+If both return your user info, sessions genuinely work across both clouds.
+
+## 7. Security note (for the report)
 
 RDS is set to `publicly_accessible = true` with inbound open on port 5432.
 This is intentional for coursework simplicity — it avoids putting Lambda in
@@ -333,7 +418,7 @@ your own machine's current IP for direct schema access. Same underlying
 tradeoff as the AWS side, different mechanism — both worth a sentence or
 two in your Design or Testing chapter.
 
-## 7. Tearing down (to avoid burning through credits)
+## 8. Tearing down (to avoid burning through credits)
 
 When you're done experimenting for the day:
 

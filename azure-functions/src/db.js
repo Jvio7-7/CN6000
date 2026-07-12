@@ -152,4 +152,74 @@ async function listEvents() {
   return result.recordset;
 }
 
-module.exports = { createEvent, createBooking, replicateEvent, replicateBooking, listEvents };
+async function createUser({ name, email, passwordHash }) {
+  const id = crypto.randomUUID();
+  const pool = await getPool();
+  const result = await pool
+    .request()
+    .input('id', sql.UniqueIdentifier, id)
+    .input('name', sql.NVarChar, name)
+    .input('email', sql.NVarChar, email)
+    .input('passwordHash', sql.NVarChar, passwordHash)
+    .query(
+      `INSERT INTO users (id, name, email, password_hash, origin_cloud)
+       OUTPUT INSERTED.id, INSERTED.name, INSERTED.email, INSERTED.created_at, INSERTED.origin_cloud
+       VALUES (@id, @name, @email, @passwordHash, 'azure')`
+    );
+  const record = result.recordset[0];
+
+  await replicateToAws('/replicate/users', { ...record, password_hash: passwordHash });
+
+  return record;
+}
+
+async function findUserByEmail(email) {
+  const pool = await getPool();
+  const result = await pool
+    .request()
+    .input('email', sql.NVarChar, email)
+    .query('SELECT * FROM users WHERE email = @email');
+  return result.recordset[0] || null;
+}
+
+async function findUserById(id) {
+  const pool = await getPool();
+  const result = await pool
+    .request()
+    .input('id', sql.UniqueIdentifier, id)
+    .query('SELECT id, name, email, created_at, origin_cloud FROM users WHERE id = @id');
+  return result.recordset[0] || null;
+}
+
+async function replicateUser(record) {
+  const pool = await getPool();
+  const existing = await pool
+    .request()
+    .input('id', sql.UniqueIdentifier, record.id)
+    .query('SELECT id FROM users WHERE id = @id');
+  if (existing.recordset.length > 0) return;
+
+  await pool
+    .request()
+    .input('id', sql.UniqueIdentifier, record.id)
+    .input('name', sql.NVarChar, record.name)
+    .input('email', sql.NVarChar, record.email)
+    .input('passwordHash', sql.NVarChar, record.password_hash)
+    .input('originCloud', sql.NVarChar, record.origin_cloud || 'aws')
+    .query(
+      `INSERT INTO users (id, name, email, password_hash, origin_cloud)
+       VALUES (@id, @name, @email, @passwordHash, @originCloud)`
+    );
+}
+
+module.exports = {
+  createEvent,
+  createBooking,
+  replicateEvent,
+  replicateBooking,
+  listEvents,
+  createUser,
+  findUserByEmail,
+  findUserById,
+  replicateUser,
+};

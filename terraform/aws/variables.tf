@@ -32,3 +32,9 @@ variable "azure_base_url" {
   description = "Azure Function App base URL including /api, e.g. https://eventapp-func-zhw36q.azurewebsites.net/api"
   type        = string
 }
+
+variable "jwt_secret" {
+  description = "Shared secret for signing/verifying JWTs - MUST match the value used in terraform/azure exactly, so tokens issued by either cloud validate on both"
+  type        = string
+  sensitive   = true
+}

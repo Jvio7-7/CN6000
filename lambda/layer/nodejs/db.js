@@ -127,4 +127,55 @@ async function listEvents() {
   return result.rows;
 }
 
-module.exports = { createEvent, createBooking, replicateEvent, replicateBooking, listEvents };
+async function createUser({ name, email, passwordHash }) {
+  const id = crypto.randomUUID();
+  const db = getPool();
+  const result = await db.query(
+    `INSERT INTO users (id, name, email, password_hash, origin_cloud)
+     VALUES ($1, $2, $3, $4, 'aws')
+     RETURNING id, name, email, created_at, origin_cloud`,
+    [id, name, email, passwordHash]
+  );
+  const record = result.rows[0];
+
+  await replicateToAzure('/replicate/users', { ...record, password_hash: passwordHash });
+
+  return record;
+}
+
+async function findUserByEmail(email) {
+  const db = getPool();
+  const result = await db.query('SELECT * FROM users WHERE email = $1', [email]);
+  return result.rows[0] || null;
+}
+
+async function findUserById(id) {
+  const db = getPool();
+  const result = await db.query(
+    'SELECT id, name, email, created_at, origin_cloud FROM users WHERE id = $1',
+    [id]
+  );
+  return result.rows[0] || null;
+}
+
+async function replicateUser(record) {
+  const db = getPool();
+  await db.query(
+    `INSERT INTO users (id, name, email, password_hash, origin_cloud)
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (id) DO NOTHING`,
+    [record.id, record.name, record.email, record.password_hash, record.origin_cloud || 'azure']
+  );
+}
+
+module.exports = {
+  createEvent,
+  createBooking,
+  replicateEvent,
+  replicateBooking,
+  listEvents,
+  createUser,
+  findUserByEmail,
+  findUserById,
+  replicateUser,
+};

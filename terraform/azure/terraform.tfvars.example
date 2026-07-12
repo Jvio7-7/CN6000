@@ -1,6 +1,10 @@
 # Copy this to terraform.tfvars (gitignored) and fill in real values.
-# Do NOT commit terraform.tfvars - it contains your DB password.
+# Do NOT commit terraform.tfvars - it contains your DB password and JWT secret.
 
 subscription_id    = "ae8484e4-7dc1-4251-9244-d1660c189811"
 sql_admin_password = "ChangeMe123!"
 aws_base_url        = "https://l30myjhqlk.execute-api.ap-southeast-1.amazonaws.com"
+
+# MUST be the exact same value as terraform/aws/terraform.tfvars - this is
+# what lets a token issued by one cloud validate on the other.
+jwt_secret = "GENERATE-YOUR-OWN-64-CHAR-HEX-STRING-AND-USE-SAME-VALUE-IN-BOTH-CLOUDS"

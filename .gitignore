@@ -14,6 +14,10 @@ crash.log
 lambda/layer.zip
 lambda/events.zip
 lambda/list-events.zip
+lambda/replicate-users.zip
+lambda/register.zip
+lambda/login.zip
+lambda/me.zip
 lambda/bookings.zip
 lambda/health.zip
 lambda/replicate-events.zip

@@ -58,6 +58,83 @@ body {
   margin: 0 0 6px;
 }
 
+.topBar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+
+.account {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-top: 4px;
+}
+
+.accountInfo {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.accountInfo.muted {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.accountEmail {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.originTag {
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--accent);
+  background: rgba(52, 84, 209, 0.1);
+  border-radius: 4px;
+  padding: 2px 6px;
+  margin-left: 8px;
+}
+
+.logoutBtn {
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+
+.logoutBtn:hover {
+  color: var(--error);
+  border-color: var(--error);
+}
+
+.authCard {
+  margin: 24px 0;
+  max-width: 420px;
+}
+
+.authCard .cardHead {
+  justify-content: space-between;
+}
+
+.authError {
+  font-size: 13px;
+  color: var(--error);
+  background: var(--error-bg);
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin: 0 0 16px;
+}
+
 .eyebrow strong {
   color: var(--accent);
   font-weight: 700;
