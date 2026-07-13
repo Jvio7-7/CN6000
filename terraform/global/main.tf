@@ -7,35 +7,20 @@ terraform {
   }
 }
 
-# Route 53 is a global service, but the provider block still needs *a*
-# region for API calls — us-east-1 is the conventional choice since it's
-# where Route 53's control plane actually lives.
+# Route 53 is global but the provider still wants a region
 provider "aws" {
   region = "us-east-1"
 }
 
-# -------------------------------------------------------------------------
-# Hosted zone
-#
-# Not delegated by a real domain registrar (see variables.tf) — used to
-# host the failover records and health checks, queried directly against
-# its own name servers for the RTO experiment rather than through public
-# DNS. This is a deliberate, documented scope simplification: it isolates
-# the measurement to Route 53's own failover logic without conflating it
-# with public DNS caching/TTL behaviour elsewhere in the resolution chain.
-# -------------------------------------------------------------------------
+# no real domain bought for this - zone isn't publicly delegated,
+# tested by querying the name servers directly instead
 
 resource "aws_route53_zone" "main" {
   name = var.zone_name
 }
 
-# -------------------------------------------------------------------------
-# Health checks
-#
-# Both hit the real /health (AWS) and /api/health (Azure) endpoints, which
-# themselves run a live SELECT 1 against each cloud's database — so this
-# reflects genuine end-to-end health, not just "is the compute layer warm".
-# -------------------------------------------------------------------------
+# these hit the real /health endpoints, which run a SELECT 1 against
+# the db, so it's a genuine health check not just "is the function warm"
 
 resource "aws_route53_health_check" "aws_endpoint" {
   fqdn              = var.aws_api_domain
@@ -63,13 +48,8 @@ resource "aws_route53_health_check" "azure_endpoint" {
   }
 }
 
-# -------------------------------------------------------------------------
-# Weighted, health-checked records — this is what makes it Active/Active
-# rather than Active/Passive. Both clouds serve traffic under normal
-# conditions (50/50 split); if either health check fails, Route 53
-# automatically stops returning that record, so all resolution shifts to
-# the surviving cloud without any manual intervention.
-# -------------------------------------------------------------------------
+# 50/50 weighted, both clouds serve traffic normally. if either health
+# check fails, Route 53 stops returning that one automatically
 
 resource "aws_route53_record" "api_aws" {
   zone_id        = aws_route53_zone.main.zone_id

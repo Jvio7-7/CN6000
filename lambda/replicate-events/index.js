@@ -1,8 +1,6 @@
 const { replicateEvent } = require('/opt/nodejs/db');
 
-// Receives a full event record (with ID already assigned by Azure) and
-// writes it locally. Never calls replicateToAzure again - replication is
-// one-hop, not a ping-pong loop.
+// one hop only, doesn't replicate again (no ping-pong loop)
 exports.handler = async (event) => {
   try {
     const body = JSON.parse(event.body || '{}');

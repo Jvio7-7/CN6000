@@ -1,9 +1,7 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 
-// JWT_SECRET must match the AWS side exactly - see lambda/layer/nodejs/auth.js
-// for the reasoning (tokens need to validate on whichever cloud a request
-// lands on, not just the one that issued them).
+// must match the AWS side exactly
 const JWT_SECRET = process.env.JWT_SECRET;
 const TOKEN_EXPIRY = '24h';
 

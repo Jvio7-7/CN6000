@@ -11,16 +11,9 @@ variable "azure_function_domain" {
 }
 
 variable "zone_name" {
-  description = <<-EOT
-    Name for the Route 53 hosted zone. This is NOT a registered/purchased
-    domain — it's used purely as an identifier for the hosted zone and for
-    the failover experiment. Since it isn't delegated by a real registrar,
-    it won't resolve through normal public DNS; it's queried directly
-    against Route 53's own assigned name servers instead. See the README
-    for the exact dig/nslookup commands used to test this.
-  EOT
-  type    = string
-  default = "cn6000-jin-fyp.com"
+  description = "not a real registered domain, just an id for the hosted zone - see README"
+  type        = string
+  default     = "cn6000-jin-fyp.com"
 }
 
 variable "record_name" {

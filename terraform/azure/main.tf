@@ -25,10 +25,7 @@ provider "azurerm" {
   skip_provider_registration = true
 }
 
-# Storage accounts, Function App hostnames, and SQL Server names must all
-# be globally unique across Azure, not just within this subscription — so
-# we append a random suffix to avoid clashing with every other student
-# doing the same CN6000 assignment.
+# random suffix so names don't clash with other students
 resource "random_string" "suffix" {
   length  = 6
   special = false
@@ -40,10 +37,7 @@ resource "azurerm_resource_group" "main" {
   location = var.azure_region
 }
 
-# -------------------------------------------------------------------------
-# Storage account — required by every Function App for internal bookkeeping
-# (triggers, logs, state), not used directly by our own code.
-# -------------------------------------------------------------------------
+# every Function App needs a storage account for its own bookkeeping
 
 resource "azurerm_storage_account" "main" {
   name                     = "${var.project_name}st${random_string.suffix.result}"
@@ -53,19 +47,14 @@ resource "azurerm_storage_account" "main" {
   account_replication_type = "LRS"
 }
 
-# Azure's control plane can lag behind the create response for storage
-# accounts, causing "resource not found" errors on the very next read
-# (e.g. when the Function App looks up the storage access key). This
-# forces a short wait before anything downstream references it.
+# azure is sometimes slow to make new resources actually readable,
+# so give it a bit before anything else tries to use this
 resource "time_sleep" "wait_storage" {
   depends_on      = [azurerm_storage_account.main]
   create_duration = "30s"
 }
 
-# -------------------------------------------------------------------------
-# Consumption plan (Y1) — this is what makes it "serverless": pay per
-# execution, scales to zero, matches AWS Lambda's pricing model.
-# -------------------------------------------------------------------------
+# Y1 = consumption plan, pay per execution like Lambda
 
 resource "azurerm_service_plan" "main" {
   name                = "${var.project_name}-plan"
@@ -88,6 +77,9 @@ resource "azurerm_linux_function_app" "main" {
     application_stack {
       node_version = "20"
     }
+    cors {
+      allowed_origins = ["*"]
+    }
   }
 
   app_settings = {
@@ -101,10 +93,7 @@ resource "azurerm_linux_function_app" "main" {
   }
 }
 
-# -------------------------------------------------------------------------
-# Azure SQL Database — the Azure-side equivalent of RDS PostgreSQL.
-# Basic tier is intentionally minimal/cheap, matches the coursework scale.
-# -------------------------------------------------------------------------
+# Basic tier, cheapest option
 
 resource "azurerm_mssql_server" "main" {
   name                         = "${var.project_name}-sql-${random_string.suffix.result}"
@@ -115,9 +104,7 @@ resource "azurerm_mssql_server" "main" {
   administrator_login_password = var.sql_admin_password
 }
 
-# Same eventual-consistency issue as the storage account, but for the SQL
-# logical server — reading its details (e.g. restorable dropped databases)
-# too soon after creation returns 404s intermittently.
+# same lag issue as the storage account
 resource "time_sleep" "wait_sql_server" {
   depends_on      = [azurerm_mssql_server.main]
   create_duration = "30s"
@@ -131,11 +118,8 @@ resource "azurerm_mssql_database" "main" {
   depends_on  = [time_sleep.wait_sql_server]
 }
 
-# Allows Azure services (including our Consumption-plan Function App,
-# which doesn't have a fixed outbound IP) to reach the SQL server. This
-# is Azure's standard "Allow Azure services" rule, not a public-internet
-# opt-in — same intent as the AWS side's RDS security group note, but
-# Azure's mechanism for it.
+# lets the Function App reach the SQL server (no fixed outbound IP
+# on consumption plan, so can't whitelist a specific address)
 resource "azurerm_mssql_firewall_rule" "allow_azure_services" {
   name             = "AllowAzureServices"
   server_id        = azurerm_mssql_server.main.id
@@ -144,8 +128,7 @@ resource "azurerm_mssql_firewall_rule" "allow_azure_services" {
   depends_on       = [time_sleep.wait_sql_server]
 }
 
-# Allows your own machine to connect directly (e.g. to run schema-mssql.sql
-# with sqlcmd). Uses whatever your current public IP is at apply time.
+# so I can run schema-mssql.sql from my own machine
 data "http" "my_ip" {
   url = "https://api.ipify.org"
 }

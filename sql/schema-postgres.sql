@@ -1,16 +1,9 @@
--- UUID primary keys (not SERIAL) are required for active-active
--- replication: two independent clouds each generating their own
--- auto-increment integers would eventually collide (AWS's event #7 and
--- Azure's event #7 would be two different, unrelated records). UUIDs are
--- globally unique regardless of which cloud created the row, so a record
--- can be replicated to the other cloud with its ID intact and no risk of
--- clashing with something the other cloud generated independently.
---
--- This script is destructive on purpose (drops existing tables first) -
--- it's meant to be re-run whenever the schema changes, not just once.
--- There's no production data here to preserve.
+-- UUIDs instead of SERIAL - two clouds writing independently would
+-- eventually generate the same auto-increment ID for different rows.
+-- Drops tables first, meant to be re-run whenever the schema changes.
 
 DROP TABLE IF EXISTS payments;
+DROP TABLE IF EXISTS notifications;
 DROP TABLE IF EXISTS bookings;
 DROP TABLE IF EXISTS events;
 DROP TABLE IF EXISTS users;
@@ -20,6 +13,8 @@ CREATE TABLE users (
   name VARCHAR(255) NOT NULL,
   email VARCHAR(255) NOT NULL UNIQUE,
   password_hash VARCHAR(255) NOT NULL,
+  reset_token VARCHAR(255),
+  reset_token_expires TIMESTAMP,
   created_at TIMESTAMP NOT NULL DEFAULT NOW(),
   origin_cloud VARCHAR(10) NOT NULL DEFAULT 'aws'
 );
@@ -42,11 +37,7 @@ CREATE TABLE bookings (
   origin_cloud VARCHAR(10) NOT NULL DEFAULT 'aws'
 );
 
--- Simulated payments only - no real payment processor is integrated
--- anywhere in this project (deliberately: real card processing would be
--- inappropriate scope and a security liability for coursework). A card
--- number ending in 0000 simulates a declined payment, otherwise it
--- succeeds - the same convention Stripe's own test cards use.
+-- fake payments, no real processor. card ending in 0000 = declined
 CREATE TABLE payments (
   id UUID PRIMARY KEY,
   booking_id UUID NOT NULL REFERENCES bookings(id),
@@ -54,6 +45,19 @@ CREATE TABLE payments (
   currency VARCHAR(3) NOT NULL DEFAULT 'USD',
   card_last4 VARCHAR(4) NOT NULL,
   status VARCHAR(20) NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  origin_cloud VARCHAR(10) NOT NULL DEFAULT 'aws'
+);
+
+-- fake notifications too, no email provider set up. not replicated -
+-- just a log of what happened on this cloud, not shared state
+CREATE TABLE notifications (
+  id UUID PRIMARY KEY,
+  recipient_email VARCHAR(255) NOT NULL,
+  subject VARCHAR(255) NOT NULL,
+  body TEXT NOT NULL,
+  related_booking_id UUID REFERENCES bookings(id),
+  status VARCHAR(20) NOT NULL DEFAULT 'sent',
   created_at TIMESTAMP NOT NULL DEFAULT NOW(),
   origin_cloud VARCHAR(10) NOT NULL DEFAULT 'aws'
 );

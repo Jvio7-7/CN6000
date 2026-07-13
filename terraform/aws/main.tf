@@ -11,17 +11,8 @@ provider "aws" {
   region = var.aws_region
 }
 
-# -------------------------------------------------------------------------
-# RDS PostgreSQL
-#
-# NOTE on security: this is deliberately kept simple for a coursework
-# deployment. The DB is publicly accessible so that Lambda functions
-# running outside a VPC (no NAT Gateway needed, avoids extra cost) can
-# reach it directly. Inbound is restricted to port 5432 from anywhere,
-# which is NOT production-safe — in a real deployment this would sit in
-# a private subnet reachable only from Lambda's VPC security group. This
-# tradeoff is intentional and documented for the report's Design chapter.
-# -------------------------------------------------------------------------
+# RDS - publicly accessible so Lambda outside a VPC can reach it (skips
+# needing a NAT gateway). not how I'd do this for something real.
 
 resource "aws_security_group" "rds_sg" {
   name        = "${var.project_name}-rds-sg"
@@ -57,10 +48,7 @@ resource "aws_db_instance" "postgres" {
   skip_final_snapshot    = true
 }
 
-# -------------------------------------------------------------------------
-# Lambda layer (shared pg dependency + db.js helper)
-# Build with build-lambda.ps1 before running terraform apply.
-# -------------------------------------------------------------------------
+# run build-lambda.ps1 before applying
 
 resource "aws_lambda_layer_version" "db_layer" {
   layer_name          = "${var.project_name}-db-layer"
@@ -69,9 +57,7 @@ resource "aws_lambda_layer_version" "db_layer" {
   compatible_runtimes = ["nodejs22.x"]
 }
 
-# -------------------------------------------------------------------------
-# IAM role shared by both Lambda functions
-# -------------------------------------------------------------------------
+# shared IAM role for all the lambdas
 
 resource "aws_iam_role" "lambda_exec" {
   name = "${var.project_name}-lambda-exec-role"
@@ -90,10 +76,6 @@ resource "aws_iam_role_policy_attachment" "lambda_basic" {
   role       = aws_iam_role.lambda_exec.name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
-
-# -------------------------------------------------------------------------
-# Lambda functions
-# -------------------------------------------------------------------------
 
 resource "aws_lambda_function" "create_event" {
   function_name    = "${var.project_name}-create-event"
@@ -165,10 +147,7 @@ resource "aws_lambda_function" "health" {
   }
 }
 
-# -------------------------------------------------------------------------
-# Replication endpoints - receive writes that originated on Azure and were
-# forwarded here. These never replicate further (one-hop only, no ping-pong).
-# -------------------------------------------------------------------------
+# these receive writes forwarded from Azure, one hop only, no loop
 
 resource "aws_lambda_function" "replicate_events" {
   function_name    = "${var.project_name}-replicate-events"
@@ -221,11 +200,7 @@ resource "aws_lambda_function" "replicate_users" {
   }
 }
 
-# -------------------------------------------------------------------------
-# User accounts - registration, login, and the "me" endpoint. JWT_SECRET
-# must match terraform/azure's value exactly so a token issued by either
-# cloud is valid on both.
-# -------------------------------------------------------------------------
+# jwt_secret has to match terraform/azure exactly
 
 resource "aws_lambda_function" "register" {
   function_name    = "${var.project_name}-register"
@@ -282,10 +257,43 @@ resource "aws_lambda_function" "me" {
   }
 }
 
-# -------------------------------------------------------------------------
-# Simulated payments - no real processor involved. See sql/schema-postgres.sql
-# for the decline-simulation convention.
-# -------------------------------------------------------------------------
+resource "aws_lambda_function" "forgot_password" {
+  function_name    = "${var.project_name}-forgot-password"
+  filename         = "${path.module}/../../lambda/forgot-password.zip"
+  source_code_hash = filebase64sha256("${path.module}/../../lambda/forgot-password.zip")
+  handler          = "index.handler"
+  runtime          = "nodejs22.x"
+  role             = aws_iam_role.lambda_exec.arn
+  layers           = [aws_lambda_layer_version.db_layer.arn]
+  timeout          = 10
+
+  environment {
+    variables = {
+      DATABASE_URL   = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
+      AZURE_BASE_URL = var.azure_base_url
+    }
+  }
+}
+
+resource "aws_lambda_function" "reset_password" {
+  function_name    = "${var.project_name}-reset-password"
+  filename         = "${path.module}/../../lambda/reset-password.zip"
+  source_code_hash = filebase64sha256("${path.module}/../../lambda/reset-password.zip")
+  handler          = "index.handler"
+  runtime          = "nodejs22.x"
+  role             = aws_iam_role.lambda_exec.arn
+  layers           = [aws_lambda_layer_version.db_layer.arn]
+  timeout          = 10
+
+  environment {
+    variables = {
+      DATABASE_URL   = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
+      AZURE_BASE_URL = var.azure_base_url
+    }
+  }
+}
+
+# fake payments, see sql/schema-postgres.sql
 
 resource "aws_lambda_function" "payments" {
   function_name    = "${var.project_name}-payments"
@@ -322,13 +330,36 @@ resource "aws_lambda_function" "replicate_payments" {
   }
 }
 
-# -------------------------------------------------------------------------
-# API Gateway (HTTP API) — routes requests to the two Lambda functions
-# -------------------------------------------------------------------------
+# fake notifications, not replicated
+
+resource "aws_lambda_function" "list_notifications" {
+  function_name    = "${var.project_name}-list-notifications"
+  filename         = "${path.module}/../../lambda/list-notifications.zip"
+  source_code_hash = filebase64sha256("${path.module}/../../lambda/list-notifications.zip")
+  handler          = "index.handler"
+  runtime          = "nodejs22.x"
+  role             = aws_iam_role.lambda_exec.arn
+  layers           = [aws_lambda_layer_version.db_layer.arn]
+  timeout          = 10
+
+  environment {
+    variables = {
+      DATABASE_URL = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
+    }
+  }
+}
+
+# API Gateway routes
 
 resource "aws_apigatewayv2_api" "http_api" {
   name          = "${var.project_name}-api"
   protocol_type = "HTTP"
+
+  cors_configuration {
+    allow_origins = ["*"]
+    allow_methods = ["GET", "POST", "OPTIONS"]
+    allow_headers = ["content-type", "authorization"]
+  }
 }
 
 resource "aws_apigatewayv2_stage" "default" {
@@ -407,6 +438,20 @@ resource "aws_apigatewayv2_integration" "me" {
   payload_format_version = "2.0"
 }
 
+resource "aws_apigatewayv2_integration" "forgot_password" {
+  api_id                 = aws_apigatewayv2_api.http_api.id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = aws_lambda_function.forgot_password.invoke_arn
+  payload_format_version = "2.0"
+}
+
+resource "aws_apigatewayv2_integration" "reset_password" {
+  api_id                 = aws_apigatewayv2_api.http_api.id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = aws_lambda_function.reset_password.invoke_arn
+  payload_format_version = "2.0"
+}
+
 resource "aws_apigatewayv2_integration" "payments" {
   api_id                 = aws_apigatewayv2_api.http_api.id
   integration_type       = "AWS_PROXY"
@@ -418,6 +463,13 @@ resource "aws_apigatewayv2_integration" "replicate_payments" {
   api_id                 = aws_apigatewayv2_api.http_api.id
   integration_type       = "AWS_PROXY"
   integration_uri        = aws_lambda_function.replicate_payments.invoke_arn
+  payload_format_version = "2.0"
+}
+
+resource "aws_apigatewayv2_integration" "list_notifications" {
+  api_id                 = aws_apigatewayv2_api.http_api.id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = aws_lambda_function.list_notifications.invoke_arn
   payload_format_version = "2.0"
 }
 
@@ -481,6 +533,18 @@ resource "aws_apigatewayv2_route" "me" {
   target    = "integrations/${aws_apigatewayv2_integration.me.id}"
 }
 
+resource "aws_apigatewayv2_route" "forgot_password" {
+  api_id    = aws_apigatewayv2_api.http_api.id
+  route_key = "POST /users/forgot-password"
+  target    = "integrations/${aws_apigatewayv2_integration.forgot_password.id}"
+}
+
+resource "aws_apigatewayv2_route" "reset_password" {
+  api_id    = aws_apigatewayv2_api.http_api.id
+  route_key = "POST /users/reset-password"
+  target    = "integrations/${aws_apigatewayv2_integration.reset_password.id}"
+}
+
 resource "aws_apigatewayv2_route" "payments" {
   api_id    = aws_apigatewayv2_api.http_api.id
   route_key = "POST /payments"
@@ -491,6 +555,12 @@ resource "aws_apigatewayv2_route" "replicate_payments" {
   api_id    = aws_apigatewayv2_api.http_api.id
   route_key = "POST /replicate/payments"
   target    = "integrations/${aws_apigatewayv2_integration.replicate_payments.id}"
+}
+
+resource "aws_apigatewayv2_route" "list_notifications" {
+  api_id    = aws_apigatewayv2_api.http_api.id
+  route_key = "GET /notifications"
+  target    = "integrations/${aws_apigatewayv2_integration.list_notifications.id}"
 }
 
 resource "aws_lambda_permission" "create_event_apigw" {
@@ -585,6 +655,30 @@ resource "aws_lambda_permission" "replicate_payments_apigw" {
   statement_id  = "AllowAPIGatewayInvokeReplicatePayments"
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.replicate_payments.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.http_api.execution_arn}/*/*"
+}
+
+resource "aws_lambda_permission" "list_notifications_apigw" {
+  statement_id  = "AllowAPIGatewayInvokeListNotifications"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.list_notifications.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.http_api.execution_arn}/*/*"
+}
+
+resource "aws_lambda_permission" "forgot_password_apigw" {
+  statement_id  = "AllowAPIGatewayInvokeForgotPassword"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.forgot_password.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.http_api.execution_arn}/*/*"
+}
+
+resource "aws_lambda_permission" "reset_password_apigw" {
+  statement_id  = "AllowAPIGatewayInvokeResetPassword"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.reset_password.function_name
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${aws_apigatewayv2_api.http_api.execution_arn}/*/*"
 }

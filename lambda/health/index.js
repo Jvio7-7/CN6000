@@ -1,9 +1,7 @@
 const { Pool } = require('pg');
 
-// A lightweight health check that actually queries the database, not just
-// "is the Lambda warm". This matters for the failover experiment: if RDS
-// becomes unreachable but Lambda itself is fine, we still want Route 53
-// to mark this endpoint unhealthy and redirect traffic to Azure.
+// actually queries the db, not just "is lambda warm" - matters for
+// the failover test since RDS could be down while lambda itself is fine
 let pool;
 
 function getPool() {

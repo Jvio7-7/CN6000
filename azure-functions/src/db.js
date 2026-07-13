@@ -1,12 +1,7 @@
 const sql = require('mssql');
 const crypto = require('crypto');
 
-// Azure side of the active-active replication - mirrors lambda/layer/nodejs/db.js.
-// Replication is awaited (not fire-and-forget) for the same reason as the
-// Lambda side: serverless compute platforms generally don't guarantee that
-// work continues after the response is sent, especially on a Consumption
-// plan where the instance can be recycled. See db.js on the AWS side for
-// the fuller explanation.
+// Azure side, mirrors lambda/layer/nodejs/db.js. Replication awaited here too.
 
 let poolPromise;
 
@@ -40,12 +35,10 @@ async function replicateToAws(path, payload) {
     });
     clearTimeout(timeout);
     if (!res.ok) {
-      console.error(`Replication to AWS failed: ${path} returned ${res.status}`);
-    } else {
-      console.log(`Replication to AWS succeeded: ${path}`);
+      console.error(`replicate to aws failed: ${path} -> ${res.status}`);
     }
   } catch (err) {
-    console.error(`Replication to AWS failed: ${path}`, err.message);
+    console.error(`replicate to aws failed: ${path}`, err.message);
   }
 }
 
@@ -89,13 +82,21 @@ async function createBooking({ eventId, attendeeName, attendeeEmail }) {
 
   await replicateToAws('/replicate/bookings', record);
 
+  try {
+    await createNotification({
+      recipientEmail: attendeeEmail,
+      subject: 'Booking confirmed',
+      body: `Your booking (${id}) is confirmed.`,
+      relatedBookingId: id,
+    });
+  } catch (err) {
+    console.error('booking notification failed:', err);
+  }
+
   return record;
 }
 
-// Idempotent insert for records replicated FROM AWS. SQL Server has no
-// native "ON CONFLICT DO NOTHING" - the standard equivalent is checking
-// existence first, or catching the primary-key-violation error. We do the
-// existence check since it's clearer to read and this isn't a hot path.
+// SQL Server has no ON CONFLICT, so check first then insert
 async function replicateEvent(record) {
   const pool = await getPool();
   const existing = await pool
@@ -191,13 +192,28 @@ async function findUserById(id) {
   return result.recordset[0] || null;
 }
 
+// upsert - could be a new user or a password/reset-token update
 async function replicateUser(record) {
   const pool = await getPool();
   const existing = await pool
     .request()
     .input('id', sql.UniqueIdentifier, record.id)
     .query('SELECT id FROM users WHERE id = @id');
-  if (existing.recordset.length > 0) return;
+
+  if (existing.recordset.length > 0) {
+    await pool
+      .request()
+      .input('id', sql.UniqueIdentifier, record.id)
+      .input('passwordHash', sql.NVarChar, record.password_hash)
+      .input('resetToken', sql.NVarChar, record.reset_token || null)
+      .input('resetTokenExpires', sql.DateTime, record.reset_token_expires || null)
+      .query(
+        `UPDATE users
+         SET password_hash = @passwordHash, reset_token = @resetToken, reset_token_expires = @resetTokenExpires
+         WHERE id = @id`
+      );
+    return;
+  }
 
   await pool
     .request()
@@ -205,11 +221,70 @@ async function replicateUser(record) {
     .input('name', sql.NVarChar, record.name)
     .input('email', sql.NVarChar, record.email)
     .input('passwordHash', sql.NVarChar, record.password_hash)
+    .input('resetToken', sql.NVarChar, record.reset_token || null)
+    .input('resetTokenExpires', sql.DateTime, record.reset_token_expires || null)
     .input('originCloud', sql.NVarChar, record.origin_cloud || 'aws')
     .query(
-      `INSERT INTO users (id, name, email, password_hash, origin_cloud)
-       VALUES (@id, @name, @email, @passwordHash, @originCloud)`
+      `INSERT INTO users (id, name, email, password_hash, reset_token, reset_token_expires, origin_cloud)
+       VALUES (@id, @name, @email, @passwordHash, @resetToken, @resetTokenExpires, @originCloud)`
     );
+}
+
+async function requestPasswordReset(email) {
+  const pool = await getPool();
+  const user = await findUserByEmail(email);
+  if (!user) return;
+
+  const token = crypto.randomBytes(24).toString('hex');
+  const expires = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+
+  await pool
+    .request()
+    .input('id', sql.UniqueIdentifier, user.id)
+    .input('resetToken', sql.NVarChar, token)
+    .input('resetTokenExpires', sql.DateTime, expires)
+    .query('UPDATE users SET reset_token = @resetToken, reset_token_expires = @resetTokenExpires WHERE id = @id');
+
+  await replicateToAws('/replicate/users', {
+    ...user,
+    reset_token: token,
+    reset_token_expires: expires,
+  });
+
+  await createNotification({
+    recipientEmail: email,
+    subject: 'Password reset requested',
+    body: `Use this code to reset your password: ${token}. It expires in 1 hour. If you didn't request this, you can ignore this message.`,
+    relatedBookingId: null,
+  });
+}
+
+async function resetPassword({ email, code, newPasswordHash }) {
+  const pool = await getPool();
+  const user = await findUserByEmail(email);
+  if (!user || !user.reset_token || user.reset_token !== code) {
+    return false;
+  }
+  if (!user.reset_token_expires || new Date(user.reset_token_expires) < new Date()) {
+    return false;
+  }
+
+  await pool
+    .request()
+    .input('id', sql.UniqueIdentifier, user.id)
+    .input('passwordHash', sql.NVarChar, newPasswordHash)
+    .query(
+      'UPDATE users SET password_hash = @passwordHash, reset_token = NULL, reset_token_expires = NULL WHERE id = @id'
+    );
+
+  await replicateToAws('/replicate/users', {
+    ...user,
+    password_hash: newPasswordHash,
+    reset_token: null,
+    reset_token_expires: null,
+  });
+
+  return true;
 }
 
 async function createPayment({ bookingId, amount, currency, cardNumber }) {
@@ -234,6 +309,27 @@ async function createPayment({ bookingId, amount, currency, cardNumber }) {
   const record = result.recordset[0];
 
   await replicateToAws('/replicate/payments', record);
+
+  try {
+    const bookingResult = await pool
+      .request()
+      .input('bookingId', sql.UniqueIdentifier, bookingId)
+      .query('SELECT attendee_email FROM bookings WHERE id = @bookingId');
+    const recipientEmail = bookingResult.recordset[0]?.attendee_email;
+    if (recipientEmail) {
+      await createNotification({
+        recipientEmail,
+        subject: status === 'declined' ? 'Payment declined' : 'Payment receipt',
+        body:
+          status === 'declined'
+            ? `Your payment of ${currency || 'USD'} ${amount} was declined.`
+            : `Payment of ${currency || 'USD'} ${amount} received, thank you.`,
+        relatedBookingId: bookingId,
+      });
+    }
+  } catch (err) {
+    console.error('payment notification failed:', err);
+  }
 
   return record;
 }
@@ -262,6 +358,34 @@ async function replicatePayment(record) {
     );
 }
 
+async function createNotification({ recipientEmail, subject, body, relatedBookingId }) {
+  const id = crypto.randomUUID();
+  const pool = await getPool();
+  await pool
+    .request()
+    .input('id', sql.UniqueIdentifier, id)
+    .input('recipientEmail', sql.NVarChar, recipientEmail)
+    .input('subject', sql.NVarChar, subject)
+    .input('body', sql.NVarChar, body)
+    .input('relatedBookingId', sql.UniqueIdentifier, relatedBookingId || null)
+    .query(
+      `INSERT INTO notifications (id, recipient_email, subject, body, related_booking_id, status, origin_cloud)
+       VALUES (@id, @recipientEmail, @subject, @body, @relatedBookingId, 'sent', 'azure')`
+    );
+}
+
+async function listNotifications() {
+  const pool = await getPool();
+  const result = await pool
+    .request()
+    .query(
+      `SELECT id, recipient_email, subject, body, related_booking_id, status, created_at, origin_cloud
+       FROM notifications
+       ORDER BY created_at DESC`
+    );
+  return result.recordset;
+}
+
 module.exports = {
   createEvent,
   createBooking,
@@ -272,6 +396,10 @@ module.exports = {
   findUserByEmail,
   findUserById,
   replicateUser,
+  requestPasswordReset,
+  resetPassword,
   createPayment,
   replicatePayment,
+  createNotification,
+  listNotifications,
 };

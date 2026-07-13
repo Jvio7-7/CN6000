@@ -1,10 +1,7 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 
-// JWT_SECRET must be identical on both AWS and Azure - it's what lets a
-// token issued by one cloud be validated by the other. This is what makes
-// sessions survive Route 53 sending a user's next request to a different
-// cloud than the one that logged them in.
+// same secret on both clouds so a token works on either side
 const JWT_SECRET = process.env.JWT_SECRET;
 const TOKEN_EXPIRY = '24h';
 
@@ -22,8 +19,7 @@ function signToken(user) {
   });
 }
 
-// Returns the decoded payload, or null if the token is missing/invalid/expired.
-// Never throws - callers just check for null and respond 401.
+// returns null if token is missing/invalid/expired, never throws
 function verifyToken(authHeader) {
   if (!authHeader || !authHeader.startsWith('Bearer ')) return null;
   const token = authHeader.slice('Bearer '.length);

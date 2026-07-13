@@ -1,0 +1,3 @@
+# Copy this to terraform.tfvars (gitignored) and fill in your subscription ID.
+
+subscription_id = "ae8484e4-7dc1-4251-9244-d1660c189811"

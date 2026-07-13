@@ -1,21 +1,10 @@
 const { Pool } = require('pg');
 const crypto = require('crypto');
 
-// AWS side of the active-active replication. Every write:
-//  1. Generates a UUID (shared with the replica, not DB-generated)
-//  2. Writes locally to RDS
-//  3. Replicates to Azure's matching endpoint, AWAITED with a bounded timeout
-//
-// IMPORTANT: step 3 is awaited, not fire-and-forget. Lambda freezes its
-// execution environment the instant the handler returns a response - any
-// async work still in flight at that point (like an un-awaited fetch())
-// gets frozen mid-request and may never complete. So "best effort, don't
-// block the user" is implemented as "always await it, but bound how long
-// with a timeout, and never let a replication failure fail the overall
-// request" - not as true background/detached work, which Lambda doesn't
-// support. This does mean replication latency is included in the API's
-// measured response time, which is worth noting directly in the
-// latency/RPO sections of the report as a real design tradeoff.
+// AWS side. Every write: generate a UUID, write to RDS, replicate to Azure.
+// awaited, not fire-and-forget - Lambda kills any async work still running
+// after the handler returns, so a background fetch just never finishes.
+// found this out the hard way when replication silently did nothing.
 
 let pool;
 
@@ -30,11 +19,11 @@ function getPool() {
   return pool;
 }
 
-const AZURE_BASE_URL = process.env.AZURE_BASE_URL; // e.g. https://eventapp-func-zhw36q.azurewebsites.net/api
+const AZURE_BASE_URL = process.env.AZURE_BASE_URL;
 const REPLICATION_TIMEOUT_MS = 3000;
 
 async function replicateToAzure(path, payload) {
-  if (!AZURE_BASE_URL) return; // replication not configured, skip silently
+  if (!AZURE_BASE_URL) return;
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), REPLICATION_TIMEOUT_MS);
@@ -46,12 +35,10 @@ async function replicateToAzure(path, payload) {
     });
     clearTimeout(timeout);
     if (!res.ok) {
-      console.error(`Replication to Azure failed: ${path} returned ${res.status}`);
-    } else {
-      console.log(`Replication to Azure succeeded: ${path}`);
+      console.error(`replicate to azure failed: ${path} -> ${res.status}`);
     }
   } catch (err) {
-    console.error(`Replication to Azure failed: ${path}`, err.message);
+    console.error(`replicate to azure failed: ${path}`, err.message);
   }
 }
 
@@ -84,12 +71,21 @@ async function createBooking({ eventId, attendeeName, attendeeEmail }) {
 
   await replicateToAzure('/replicate/bookings', record);
 
+  try {
+    await createNotification({
+      recipientEmail: attendeeEmail,
+      subject: 'Booking confirmed',
+      body: `Your booking (${id}) is confirmed.`,
+      relatedBookingId: id,
+    });
+  } catch (err) {
+    console.error('booking notification failed:', err);
+  }
+
   return record;
 }
 
-// Called when AZURE replicates a write TO this side. Uses ON CONFLICT DO
-// NOTHING so replaying the same record twice (e.g. a retried request)
-// doesn't error - replication should be idempotent.
+// ON CONFLICT DO NOTHING so a retried replication request doesn't error out
 async function replicateEvent(record) {
   const db = getPool();
   await db.query(
@@ -158,20 +154,84 @@ async function findUserById(id) {
   return result.rows[0] || null;
 }
 
+// upsert, not skip-if-exists - needs to handle a password/reset-token
+// update arriving from the other cloud too, not just brand new users
 async function replicateUser(record) {
   const db = getPool();
   await db.query(
-    `INSERT INTO users (id, name, email, password_hash, origin_cloud)
-     VALUES ($1, $2, $3, $4, $5)
-     ON CONFLICT (id) DO NOTHING`,
-    [record.id, record.name, record.email, record.password_hash, record.origin_cloud || 'azure']
+    `INSERT INTO users (id, name, email, password_hash, reset_token, reset_token_expires, origin_cloud)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
+     ON CONFLICT (id) DO UPDATE SET
+       password_hash = EXCLUDED.password_hash,
+       reset_token = EXCLUDED.reset_token,
+       reset_token_expires = EXCLUDED.reset_token_expires`,
+    [
+      record.id,
+      record.name,
+      record.email,
+      record.password_hash,
+      record.reset_token || null,
+      record.reset_token_expires || null,
+      record.origin_cloud || 'azure',
+    ]
   );
 }
 
-// Simulated payment only - no real processor involved anywhere in this
-// project. A card ending in 0000 simulates a decline (same convention as
-// Stripe's test cards); anything else simulates success. The full card
-// number is never stored or logged, only the last 4 digits.
+async function requestPasswordReset(email) {
+  const db = getPool();
+  const user = await findUserByEmail(email);
+  if (!user) return; // don't reveal whether the email exists
+
+  const token = crypto.randomBytes(24).toString('hex');
+  const expires = new Date(Date.now() + 60 * 60 * 1000);
+
+  await db.query('UPDATE users SET reset_token = $1, reset_token_expires = $2 WHERE id = $3', [
+    token,
+    expires,
+    user.id,
+  ]);
+
+  await replicateToAzure('/replicate/users', {
+    ...user,
+    reset_token: token,
+    reset_token_expires: expires,
+  });
+
+  await createNotification({
+    recipientEmail: email,
+    subject: 'Password reset requested',
+    body: `Use this code to reset your password: ${token}. It expires in 1 hour. If you didn't request this, you can ignore this message.`,
+    relatedBookingId: null,
+  });
+}
+
+// newPasswordHash comes in pre-hashed from the handler
+async function resetPassword({ email, code, newPasswordHash }) {
+  const db = getPool();
+  const user = await findUserByEmail(email);
+  if (!user || !user.reset_token || user.reset_token !== code) {
+    return false;
+  }
+  if (!user.reset_token_expires || new Date(user.reset_token_expires) < new Date()) {
+    return false;
+  }
+
+  await db.query(
+    'UPDATE users SET password_hash = $1, reset_token = NULL, reset_token_expires = NULL WHERE id = $2',
+    [newPasswordHash, user.id]
+  );
+
+  await replicateToAzure('/replicate/users', {
+    ...user,
+    password_hash: newPasswordHash,
+    reset_token: null,
+    reset_token_expires: null,
+  });
+
+  return true;
+}
+
+// card ending in 0000 = declined, anything else = success (like Stripe test cards)
 async function createPayment({ bookingId, amount, currency, cardNumber }) {
   const id = crypto.randomUUID();
   const last4 = cardNumber.slice(-4);
@@ -187,6 +247,26 @@ async function createPayment({ bookingId, amount, currency, cardNumber }) {
   const record = result.rows[0];
 
   await replicateToAzure('/replicate/payments', record);
+
+  try {
+    const bookingResult = await db.query('SELECT attendee_email FROM bookings WHERE id = $1', [
+      bookingId,
+    ]);
+    const recipientEmail = bookingResult.rows[0]?.attendee_email;
+    if (recipientEmail) {
+      await createNotification({
+        recipientEmail,
+        subject: status === 'declined' ? 'Payment declined' : 'Payment receipt',
+        body:
+          status === 'declined'
+            ? `Your payment of ${currency || 'USD'} ${amount} was declined.`
+            : `Payment of ${currency || 'USD'} ${amount} received, thank you.`,
+        relatedBookingId: bookingId,
+      });
+    }
+  } catch (err) {
+    console.error('payment notification failed:', err);
+  }
 
   return record;
 }
@@ -210,6 +290,26 @@ async function replicatePayment(record) {
   );
 }
 
+async function createNotification({ recipientEmail, subject, body, relatedBookingId }) {
+  const id = crypto.randomUUID();
+  const db = getPool();
+  await db.query(
+    `INSERT INTO notifications (id, recipient_email, subject, body, related_booking_id, status, origin_cloud)
+     VALUES ($1, $2, $3, $4, $5, 'sent', 'aws')`,
+    [id, recipientEmail, subject, body, relatedBookingId || null]
+  );
+}
+
+async function listNotifications() {
+  const db = getPool();
+  const result = await db.query(
+    `SELECT id, recipient_email, subject, body, related_booking_id, status, created_at, origin_cloud
+     FROM notifications
+     ORDER BY created_at DESC`
+  );
+  return result.rows;
+}
+
 module.exports = {
   createEvent,
   createBooking,
@@ -220,6 +320,10 @@ module.exports = {
   findUserByEmail,
   findUserById,
   replicateUser,
+  requestPasswordReset,
+  resetPassword,
   createPayment,
   replicatePayment,
+  createNotification,
+  listNotifications,
 };

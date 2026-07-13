@@ -1,9 +1,7 @@
 const { app } = require('@azure/functions');
 const sql = require('mssql');
 
-// Mirrors the AWS Lambda health check: actually queries the database
-// rather than just confirming the Function App is warm, so Route 53's
-// health check reflects real end-to-end health on this cloud.
+// mirrors the lambda health check, actually hits the db
 let poolPromise;
 
 function getPool() {

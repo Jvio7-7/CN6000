@@ -1,5 +1,6 @@
 node_modules/
 .next/
+out/
 .env
 .env.local
 
@@ -18,8 +19,11 @@ lambda/replicate-users.zip
 lambda/register.zip
 lambda/login.zip
 lambda/me.zip
+lambda/forgot-password.zip
+lambda/reset-password.zip
 lambda/payments.zip
 lambda/replicate-payments.zip
+lambda/list-notifications.zip
 lambda/bookings.zip
 lambda/health.zip
 lambda/replicate-events.zip
