@@ -26,7 +26,7 @@ app.http('login', {
       }
 
       const token = signToken(user);
-      const { password_hash, ...safeUser } = user;
+      const { password_hash, security_answer_hash, ...safeUser } = user;
 
       return { status: 200, jsonBody: { user: safeUser, token } };
     } catch (err) {

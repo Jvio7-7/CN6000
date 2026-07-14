@@ -1,36 +1,49 @@
-const { resetPassword } = require('/opt/nodejs/db');
-const { hashPassword } = require('/opt/nodejs/auth');
+const { findUserByEmail, resetPasswordWithAnswer } = require('/opt/nodejs/db');
+const { hashPassword, verifyPassword, validatePassword } = require('/opt/nodejs/auth');
 
 exports.handler = async (event) => {
   try {
     const body = JSON.parse(event.body || '{}');
-    const { email, code, newPassword } = body;
+    const { email, answer, newPassword } = body;
 
-    if (!email || !code || !newPassword) {
+    if (!email || !answer || !newPassword) {
       return {
         statusCode: 400,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ error: 'email, code, and newPassword are all required' }),
+        body: JSON.stringify({ error: 'email, answer, and newPassword are all required' }),
       };
     }
-    if (newPassword.length < 8) {
+    const passwordError = validatePassword(newPassword);
+    if (passwordError) {
       return {
         statusCode: 400,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ error: 'password must be at least 8 characters' }),
+        body: JSON.stringify({ error: passwordError }),
+      };
+    }
+
+    const user = await findUserByEmail(email);
+    if (!user) {
+      return {
+        statusCode: 404,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ error: 'No account found with that email' }),
+      };
+    }
+
+    // same normalisation as when the answer was first set - see register
+    const normalisedAnswer = answer.trim().toLowerCase();
+    const answerCorrect = await verifyPassword(normalisedAnswer, user.security_answer_hash);
+    if (!answerCorrect) {
+      return {
+        statusCode: 400,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ error: 'That answer doesn\u2019t match' }),
       };
     }
 
     const newPasswordHash = await hashPassword(newPassword);
-    const ok = await resetPassword({ email, code, newPasswordHash });
-
-    if (!ok) {
-      return {
-        statusCode: 400,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ error: 'That code is invalid or has expired' }),
-      };
-    }
+    await resetPasswordWithAnswer({ email, newPasswordHash });
 
     return {
       statusCode: 200,

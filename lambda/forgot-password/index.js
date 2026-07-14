@@ -1,6 +1,8 @@
-const { requestPasswordReset } = require('/opt/nodejs/db');
+const { getSecurityQuestion } = require('/opt/nodejs/db');
 
-// same response either way, don't leak whether the email exists
+// deliberately DOES reveal whether the email is registered, same
+// product decision as before - now returns the security question
+// itself, never the answer
 exports.handler = async (event) => {
   try {
     const body = JSON.parse(event.body || '{}');
@@ -14,15 +16,22 @@ exports.handler = async (event) => {
       };
     }
 
-    await requestPasswordReset(email);
+    const question = await getSecurityQuestion(email);
+    if (!question) {
+      return {
+        statusCode: 404,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ error: 'No account found with that email' }),
+      };
+    }
 
     return {
       statusCode: 200,
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: 'If an account exists for that email, a reset code has been sent.' }),
+      body: JSON.stringify({ question }),
     };
   } catch (err) {
-    console.error('Failed to process password reset request:', err);
+    console.error('Failed to look up security question:', err);
     return {
       statusCode: 500,
       headers: { 'Content-Type': 'application/json' },

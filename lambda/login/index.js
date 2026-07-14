@@ -33,7 +33,7 @@ exports.handler = async (event) => {
     }
 
     const token = signToken(user);
-    const { password_hash, ...safeUser } = user;
+    const { password_hash, security_answer_hash, ...safeUser } = user;
 
     return {
       statusCode: 200,

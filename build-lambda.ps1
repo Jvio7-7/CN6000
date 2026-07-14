@@ -59,6 +59,30 @@ Write-Host "Zipping reset-password function..."
 if (Test-Path lambda/reset-password.zip) { Remove-Item lambda/reset-password.zip }
 Compress-Archive -Path lambda/reset-password/index.js -DestinationPath lambda/reset-password.zip
 
+Write-Host "Zipping update-profile function..."
+if (Test-Path lambda/update-profile.zip) { Remove-Item lambda/update-profile.zip }
+Compress-Archive -Path lambda/update-profile/index.js -DestinationPath lambda/update-profile.zip
+
+Write-Host "Zipping change-password function..."
+if (Test-Path lambda/change-password.zip) { Remove-Item lambda/change-password.zip }
+Compress-Archive -Path lambda/change-password/index.js -DestinationPath lambda/change-password.zip
+
+Write-Host "Zipping cancel-event function..."
+if (Test-Path lambda/cancel-event.zip) { Remove-Item lambda/cancel-event.zip }
+Compress-Archive -Path lambda/cancel-event/index.js -DestinationPath lambda/cancel-event.zip
+
+Write-Host "Zipping cancel-booking function..."
+if (Test-Path lambda/cancel-booking.zip) { Remove-Item lambda/cancel-booking.zip }
+Compress-Archive -Path lambda/cancel-booking/index.js -DestinationPath lambda/cancel-booking.zip
+
+Write-Host "Zipping my-events function..."
+if (Test-Path lambda/my-events.zip) { Remove-Item lambda/my-events.zip }
+Compress-Archive -Path lambda/my-events/index.js -DestinationPath lambda/my-events.zip
+
+Write-Host "Zipping my-bookings function..."
+if (Test-Path lambda/my-bookings.zip) { Remove-Item lambda/my-bookings.zip }
+Compress-Archive -Path lambda/my-bookings/index.js -DestinationPath lambda/my-bookings.zip
+
 Write-Host "Zipping payments function..."
 if (Test-Path lambda/payments.zip) { Remove-Item lambda/payments.zip }
 Compress-Archive -Path lambda/payments/index.js -DestinationPath lambda/payments.zip

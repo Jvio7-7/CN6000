@@ -29,4 +29,22 @@ function verifyToken(authHeader) {
   }
 }
 
-module.exports = { hashPassword, verifyPassword, signToken, verifyToken };
+// mirrors lambda/layer/nodejs/auth.js exactly
+function validatePassword(password) {
+  if (typeof password !== 'string' || password.length < 12 || password.length > 24) {
+    return 'Password must be 12-24 characters long';
+  }
+  if (!/[A-Z]/.test(password)) return 'Password must include an uppercase letter';
+  if (!/[a-z]/.test(password)) return 'Password must include a lowercase letter';
+  if (!/[0-9]/.test(password)) return 'Password must include a number';
+  if (!/[^A-Za-z0-9]/.test(password)) return 'Password must include a special character';
+  return null;
+}
+
+module.exports = {
+  hashPassword,
+  verifyPassword,
+  signToken,
+  verifyToken,
+  validatePassword,
+};

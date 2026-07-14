@@ -1,6 +1,9 @@
 const sql = require('mssql');
 const crypto = require('crypto');
 
+// mirrors lambda/layer/nodejs/db.js's ValidationError
+class ValidationError extends Error {}
+
 // Azure side, mirrors lambda/layer/nodejs/db.js. Replication awaited here too.
 
 let poolPromise;
@@ -19,7 +22,7 @@ function getPool() {
   return poolPromise;
 }
 
-const AWS_BASE_URL = process.env.AWS_BASE_URL; // e.g. https://l30myjhqlk.execute-api.ap-southeast-1.amazonaws.com
+const AWS_BASE_URL = process.env.AWS_BASE_URL;
 const REPLICATION_TIMEOUT_MS = 3000;
 
 async function replicateToAws(path, payload) {
@@ -42,20 +45,36 @@ async function replicateToAws(path, payload) {
   }
 }
 
-async function createEvent({ title, date, location, capacity }) {
+// ---------------------------------------------------------------------
+// Events - owned by the creating user (userId required), soft-deleted
+// via cancelled_at rather than a hard DELETE (bookings/payments reference
+// the event by foreign key).
+// ---------------------------------------------------------------------
+
+async function createEvent({ userId, title, date, location, capacity, price }) {
+  if (new Date(date) <= new Date()) {
+    throw new ValidationError('Event date must be in the future');
+  }
+  const priceNum = Number(price) || 0;
+  if (priceNum < 0) {
+    throw new ValidationError('Price can\u2019t be negative');
+  }
+
   const id = crypto.randomUUID();
   const pool = await getPool();
   const result = await pool
     .request()
     .input('id', sql.UniqueIdentifier, id)
+    .input('userId', sql.UniqueIdentifier, userId)
     .input('title', sql.NVarChar, title)
-    .input('eventDate', sql.DateTime, date)
+    .input('date', sql.DateTime, new Date(date))
     .input('location', sql.NVarChar, location)
     .input('capacity', sql.Int, capacity)
+    .input('price', sql.Decimal(10, 2), priceNum)
     .query(
-      `INSERT INTO events (id, title, event_date, location, capacity, origin_cloud)
-       OUTPUT INSERTED.id, INSERTED.title, INSERTED.event_date, INSERTED.location, INSERTED.capacity, INSERTED.origin_cloud
-       VALUES (@id, @title, @eventDate, @location, @capacity, 'azure')`
+      `INSERT INTO events (id, user_id, title, event_date, location, capacity, price, origin_cloud)
+       OUTPUT INSERTED.id, INSERTED.user_id, INSERTED.title, INSERTED.event_date, INSERTED.location, INSERTED.capacity, INSERTED.price, INSERTED.cancelled_at, INSERTED.origin_cloud
+       VALUES (@id, @userId, @title, @date, @location, @capacity, @price, 'azure')`
     );
   const record = result.recordset[0];
 
@@ -64,19 +83,185 @@ async function createEvent({ title, date, location, capacity }) {
   return record;
 }
 
-async function createBooking({ eventId, attendeeName, attendeeEmail }) {
-  const id = crypto.randomUUID();
+// booking_count is a live count, not a stored column - see
+// lambda/layer/nodejs/db.js
+async function listEvents() {
   const pool = await getPool();
   const result = await pool
     .request()
+    .query(
+      `SELECT e.id, e.title, e.event_date, e.location, e.capacity, e.price, e.origin_cloud,
+              (SELECT COUNT(*) FROM bookings b WHERE b.event_id = e.id AND b.cancelled_at IS NULL) AS booking_count
+       FROM events e
+       WHERE e.cancelled_at IS NULL
+       ORDER BY e.event_date ASC`
+    );
+  return result.recordset;
+}
+
+async function listMyEvents(userId) {
+  const pool = await getPool();
+  const result = await pool
+    .request()
+    .input('userId', sql.UniqueIdentifier, userId)
+    .query(
+      `SELECT id, title, event_date, location, capacity, price, cancelled_at, origin_cloud
+       FROM events
+       WHERE user_id = @userId
+       ORDER BY event_date DESC`
+    );
+  return result.recordset;
+}
+
+// cascades: every active booking against this event gets cancelled too,
+// with a refund notification for anyone who'd completed a payment - see
+// lambda/layer/nodejs/db.js
+async function cancelEvent(eventId, userId) {
+  const pool = await getPool();
+  const result = await pool
+    .request()
+    .input('id', sql.UniqueIdentifier, eventId)
+    .input('userId', sql.UniqueIdentifier, userId)
+    .query(
+      `UPDATE events SET cancelled_at = GETDATE()
+       OUTPUT INSERTED.id, INSERTED.user_id, INSERTED.title, INSERTED.event_date, INSERTED.location, INSERTED.capacity, INSERTED.price, INSERTED.cancelled_at, INSERTED.origin_cloud
+       WHERE id = @id AND user_id = @userId AND cancelled_at IS NULL`
+    );
+  const record = result.recordset[0];
+  if (!record) return null;
+
+  await replicateToAws('/replicate/events', record);
+
+  const bookings = await pool
+    .request()
+    .input('eventId', sql.UniqueIdentifier, eventId)
+    .query('SELECT id, attendee_name, attendee_email FROM bookings WHERE event_id = @eventId AND cancelled_at IS NULL');
+
+  for (const booking of bookings.recordset) {
+    const cancelled = await cancelBookingInternal(booking.id);
+    if (!cancelled) continue;
+
+    const payment = await pool
+      .request()
+      .input('bookingId', sql.UniqueIdentifier, booking.id)
+      .query(
+        `SELECT TOP 1 id FROM payments WHERE booking_id = @bookingId AND status = 'completed' ORDER BY created_at DESC`
+      );
+
+    try {
+      if (payment.recordset[0]) {
+        await createNotification({
+          recipientEmail: booking.attendee_email,
+          subject: 'Event cancelled \u2014 refund issued',
+          body: `${record.title} was cancelled by the host. Your payment has been refunded.`,
+          relatedBookingId: booking.id,
+        });
+      } else {
+        await createNotification({
+          recipientEmail: booking.attendee_email,
+          subject: 'Event cancelled',
+          body: `${record.title} was cancelled by the host.`,
+          relatedBookingId: booking.id,
+        });
+      }
+    } catch (err) {
+      console.error('cancellation notification failed:', err);
+    }
+  }
+
+  return record;
+}
+
+// upsert - a cancellation from the other cloud needs to update the row
+// here too, not be skipped because the id already exists
+async function replicateEvent(record) {
+  const pool = await getPool();
+  const existing = await pool
+    .request()
+    .input('id', sql.UniqueIdentifier, record.id)
+    .query('SELECT id FROM events WHERE id = @id');
+
+  if (existing.recordset.length > 0) {
+    await pool
+      .request()
+      .input('id', sql.UniqueIdentifier, record.id)
+      .input('title', sql.NVarChar, record.title)
+      .input('date', sql.DateTime, new Date(record.event_date))
+      .input('location', sql.NVarChar, record.location)
+      .input('capacity', sql.Int, record.capacity)
+      .input('price', sql.Decimal(10, 2), record.price || 0)
+      .input('cancelledAt', sql.DateTime, record.cancelled_at || null)
+      .query(
+        `UPDATE events SET title = @title, event_date = @date, location = @location,
+         capacity = @capacity, price = @price, cancelled_at = @cancelledAt WHERE id = @id`
+      );
+    return;
+  }
+
+  await pool
+    .request()
+    .input('id', sql.UniqueIdentifier, record.id)
+    .input('userId', sql.UniqueIdentifier, record.user_id)
+    .input('title', sql.NVarChar, record.title)
+    .input('date', sql.DateTime, new Date(record.event_date))
+    .input('location', sql.NVarChar, record.location)
+    .input('capacity', sql.Int, record.capacity)
+    .input('price', sql.Decimal(10, 2), record.price || 0)
+    .input('cancelledAt', sql.DateTime, record.cancelled_at || null)
+    .input('originCloud', sql.NVarChar, record.origin_cloud || 'aws')
+    .query(
+      `INSERT INTO events (id, user_id, title, event_date, location, capacity, price, cancelled_at, origin_cloud)
+       VALUES (@id, @userId, @title, @date, @location, @capacity, @price, @cancelledAt, @originCloud)`
+    );
+}
+
+// ---------------------------------------------------------------------
+// Bookings - same ownership + soft-delete pattern
+// ---------------------------------------------------------------------
+
+async function createBooking({ userId, eventId, attendeeName, attendeeEmail }) {
+  const pool = await getPool();
+
+  const dup = await pool
+    .request()
+    .input('userId', sql.UniqueIdentifier, userId)
+    .input('eventId', sql.UniqueIdentifier, eventId)
+    .query('SELECT id FROM bookings WHERE user_id = @userId AND event_id = @eventId AND cancelled_at IS NULL');
+  if (dup.recordset[0]) {
+    throw new ValidationError('You\u2019ve already booked a spot for this event');
+  }
+
+  const eventResult = await pool
+    .request()
+    .input('eventId', sql.UniqueIdentifier, eventId)
+    .query('SELECT user_id, capacity FROM events WHERE id = @eventId');
+  const eventRow = eventResult.recordset[0];
+  if (!eventRow) {
+    throw new ValidationError('Event not found');
+  }
+  if (eventRow.user_id.toLowerCase() === userId.toLowerCase()) {
+    throw new ValidationError('You can\u2019t book your own event');
+  }
+  const countResult = await pool
+    .request()
+    .input('eventId', sql.UniqueIdentifier, eventId)
+    .query('SELECT COUNT(*) AS count FROM bookings WHERE event_id = @eventId AND cancelled_at IS NULL');
+  if (Number(countResult.recordset[0].count) >= eventRow.capacity) {
+    throw new ValidationError('This event is full');
+  }
+
+  const id = crypto.randomUUID();
+  const result = await pool
+    .request()
     .input('id', sql.UniqueIdentifier, id)
+    .input('userId', sql.UniqueIdentifier, userId)
     .input('eventId', sql.UniqueIdentifier, eventId)
     .input('attendeeName', sql.NVarChar, attendeeName)
     .input('attendeeEmail', sql.NVarChar, attendeeEmail)
     .query(
-      `INSERT INTO bookings (id, event_id, attendee_name, attendee_email, origin_cloud)
-       OUTPUT INSERTED.id, INSERTED.event_id, INSERTED.attendee_name, INSERTED.attendee_email, INSERTED.created_at, INSERTED.origin_cloud
-       VALUES (@id, @eventId, @attendeeName, @attendeeEmail, 'azure')`
+      `INSERT INTO bookings (id, user_id, event_id, attendee_name, attendee_email, origin_cloud)
+       OUTPUT INSERTED.id, INSERTED.user_id, INSERTED.event_id, INSERTED.attendee_name, INSERTED.attendee_email, INSERTED.cancelled_at, INSERTED.created_at, INSERTED.origin_cloud
+       VALUES (@id, @userId, @eventId, @attendeeName, @attendeeEmail, 'azure')`
     );
   const record = result.recordset[0];
 
@@ -96,27 +281,74 @@ async function createBooking({ eventId, attendeeName, attendeeEmail }) {
   return record;
 }
 
-// SQL Server has no ON CONFLICT, so check first then insert
-async function replicateEvent(record) {
+async function listMyBookings(userId) {
   const pool = await getPool();
-  const existing = await pool
+  const result = await pool
     .request()
-    .input('id', sql.UniqueIdentifier, record.id)
-    .query('SELECT id FROM events WHERE id = @id');
-  if (existing.recordset.length > 0) return;
-
-  await pool
-    .request()
-    .input('id', sql.UniqueIdentifier, record.id)
-    .input('title', sql.NVarChar, record.title)
-    .input('eventDate', sql.DateTime, record.event_date)
-    .input('location', sql.NVarChar, record.location)
-    .input('capacity', sql.Int, record.capacity)
-    .input('originCloud', sql.NVarChar, record.origin_cloud || 'aws')
+    .input('userId', sql.UniqueIdentifier, userId)
     .query(
-      `INSERT INTO events (id, title, event_date, location, capacity, origin_cloud)
-       VALUES (@id, @title, @eventDate, @location, @capacity, @originCloud)`
+      `SELECT b.id, b.event_id, b.attendee_name, b.attendee_email, b.cancelled_at, b.created_at, b.origin_cloud,
+              e.title AS event_title, e.event_date
+       FROM bookings b
+       JOIN events e ON e.id = b.event_id
+       WHERE b.user_id = @userId
+       ORDER BY b.created_at DESC`
     );
+  return result.recordset;
+}
+
+// shared core used both by the participant's own cancel request and by
+// cancelEvent's cascade - see lambda/layer/nodejs/db.js
+async function cancelBookingInternal(bookingId, userId = null) {
+  const pool = await getPool();
+  const request = pool.request().input('id', sql.UniqueIdentifier, bookingId);
+  let where = 'id = @id AND cancelled_at IS NULL';
+  if (userId) {
+    request.input('userId', sql.UniqueIdentifier, userId);
+    where = 'id = @id AND user_id = @userId AND cancelled_at IS NULL';
+  }
+
+  const result = await request.query(
+    `UPDATE bookings SET cancelled_at = GETDATE()
+     OUTPUT INSERTED.id, INSERTED.user_id, INSERTED.event_id, INSERTED.attendee_name, INSERTED.attendee_email, INSERTED.cancelled_at, INSERTED.created_at, INSERTED.origin_cloud
+     WHERE ${where}`
+  );
+  const record = result.recordset[0];
+  if (!record) return null;
+
+  await replicateToAws('/replicate/bookings', record);
+  return record;
+}
+
+// participant cancelling their own booking - refund notification if
+// they'd actually paid
+async function cancelBooking(bookingId, userId) {
+  const record = await cancelBookingInternal(bookingId, userId);
+  if (!record) return null;
+
+  const pool = await getPool();
+  const payment = await pool
+    .request()
+    .input('bookingId', sql.UniqueIdentifier, bookingId)
+    .query(
+      `SELECT TOP 1 id, amount, currency FROM payments WHERE booking_id = @bookingId AND status = 'completed' ORDER BY created_at DESC`
+    );
+
+  if (payment.recordset[0]) {
+    try {
+      const p = payment.recordset[0];
+      await createNotification({
+        recipientEmail: record.attendee_email,
+        subject: 'Booking cancelled \u2014 refund issued',
+        body: `Your booking was cancelled and your payment of ${p.currency} ${p.amount} has been refunded.`,
+        relatedBookingId: bookingId,
+      });
+    } catch (err) {
+      console.error('refund notification failed:', err);
+    }
+  }
+
+  return record;
 }
 
 async function replicateBooking(record) {
@@ -125,35 +357,44 @@ async function replicateBooking(record) {
     .request()
     .input('id', sql.UniqueIdentifier, record.id)
     .query('SELECT id FROM bookings WHERE id = @id');
-  if (existing.recordset.length > 0) return;
+
+  if (existing.recordset.length > 0) {
+    await pool
+      .request()
+      .input('id', sql.UniqueIdentifier, record.id)
+      .input('attendeeName', sql.NVarChar, record.attendee_name)
+      .input('attendeeEmail', sql.NVarChar, record.attendee_email)
+      .input('cancelledAt', sql.DateTime, record.cancelled_at || null)
+      .query(
+        `UPDATE bookings SET attendee_name = @attendeeName, attendee_email = @attendeeEmail,
+         cancelled_at = @cancelledAt WHERE id = @id`
+      );
+    return;
+  }
 
   await pool
     .request()
     .input('id', sql.UniqueIdentifier, record.id)
+    .input('userId', sql.UniqueIdentifier, record.user_id)
     .input('eventId', sql.UniqueIdentifier, record.event_id)
     .input('attendeeName', sql.NVarChar, record.attendee_name)
     .input('attendeeEmail', sql.NVarChar, record.attendee_email)
+    .input('cancelledAt', sql.DateTime, record.cancelled_at || null)
     .input('createdAt', sql.DateTime, record.created_at)
     .input('originCloud', sql.NVarChar, record.origin_cloud || 'aws')
     .query(
-      `INSERT INTO bookings (id, event_id, attendee_name, attendee_email, created_at, origin_cloud)
-       VALUES (@id, @eventId, @attendeeName, @attendeeEmail, @createdAt, @originCloud)`
+      `INSERT INTO bookings (id, user_id, event_id, attendee_name, attendee_email, cancelled_at, created_at, origin_cloud)
+       VALUES (@id, @userId, @eventId, @attendeeName, @attendeeEmail, @cancelledAt, @createdAt, @originCloud)`
     );
 }
 
-async function listEvents() {
-  const pool = await getPool();
-  const result = await pool
-    .request()
-    .query(
-      `SELECT id, title, event_date, location, capacity, origin_cloud
-       FROM events
-       ORDER BY event_date ASC`
-    );
-  return result.recordset;
-}
+// ---------------------------------------------------------------------
+// Users - registration, profile edit, password change/reset
+// ---------------------------------------------------------------------
 
-async function createUser({ name, email, passwordHash }) {
+// no email verification - account usable immediately, mirrors
+// lambda/layer/nodejs/db.js
+async function createUser({ name, email, passwordHash, securityQuestion, securityAnswerHash }) {
   const id = crypto.randomUUID();
   const pool = await getPool();
   const result = await pool
@@ -162,14 +403,21 @@ async function createUser({ name, email, passwordHash }) {
     .input('name', sql.NVarChar, name)
     .input('email', sql.NVarChar, email)
     .input('passwordHash', sql.NVarChar, passwordHash)
+    .input('securityQuestion', sql.NVarChar, securityQuestion)
+    .input('securityAnswerHash', sql.NVarChar, securityAnswerHash)
     .query(
-      `INSERT INTO users (id, name, email, password_hash, origin_cloud)
+      `INSERT INTO users (id, name, email, password_hash, security_question, security_answer_hash, origin_cloud)
        OUTPUT INSERTED.id, INSERTED.name, INSERTED.email, INSERTED.created_at, INSERTED.origin_cloud
-       VALUES (@id, @name, @email, @passwordHash, 'azure')`
+       VALUES (@id, @name, @email, @passwordHash, @securityQuestion, @securityAnswerHash, 'azure')`
     );
   const record = result.recordset[0];
 
-  await replicateToAws('/replicate/users', { ...record, password_hash: passwordHash });
+  await replicateToAws('/replicate/users', {
+    ...record,
+    password_hash: passwordHash,
+    security_question: securityQuestion,
+    security_answer_hash: securityAnswerHash,
+  });
 
   return record;
 }
@@ -192,7 +440,55 @@ async function findUserById(id) {
   return result.recordset[0] || null;
 }
 
-// upsert - could be a new user or a password/reset-token update
+// includes password_hash, unlike findUserById - only for internal use by
+// the change-password handler
+async function findUserByIdWithPassword(id) {
+  const pool = await getPool();
+  const result = await pool
+    .request()
+    .input('id', sql.UniqueIdentifier, id)
+    .query('SELECT * FROM users WHERE id = @id');
+  return result.recordset[0] || null;
+}
+
+async function updateProfile(userId, { name }) {
+  const pool = await getPool();
+  const result = await pool
+    .request()
+    .input('id', sql.UniqueIdentifier, userId)
+    .input('name', sql.NVarChar, name)
+    .query(
+      `UPDATE users SET name = @name
+       OUTPUT INSERTED.id, INSERTED.name, INSERTED.email, INSERTED.password_hash, INSERTED.security_question, INSERTED.security_answer_hash, INSERTED.created_at, INSERTED.origin_cloud
+       WHERE id = @id`
+    );
+  const record = result.recordset[0];
+  if (!record) return null;
+
+  await replicateToAws('/replicate/users', record);
+  const { password_hash, security_answer_hash, ...safe } = record;
+  return safe;
+}
+
+async function changePassword(userId, newPasswordHash) {
+  const pool = await getPool();
+  const result = await pool
+    .request()
+    .input('id', sql.UniqueIdentifier, userId)
+    .input('passwordHash', sql.NVarChar, newPasswordHash)
+    .query(
+      `UPDATE users SET password_hash = @passwordHash
+       OUTPUT INSERTED.id, INSERTED.name, INSERTED.email, INSERTED.password_hash, INSERTED.security_question, INSERTED.security_answer_hash, INSERTED.created_at, INSERTED.origin_cloud
+       WHERE id = @id`
+    );
+  const record = result.recordset[0];
+  if (!record) return null;
+
+  await replicateToAws('/replicate/users', record);
+  return true;
+}
+
+// upsert - could be a new user or a profile/password/answer update
 async function replicateUser(record) {
   const pool = await getPool();
   const existing = await pool
@@ -204,12 +500,14 @@ async function replicateUser(record) {
     await pool
       .request()
       .input('id', sql.UniqueIdentifier, record.id)
+      .input('name', sql.NVarChar, record.name)
       .input('passwordHash', sql.NVarChar, record.password_hash)
-      .input('resetToken', sql.NVarChar, record.reset_token || null)
-      .input('resetTokenExpires', sql.DateTime, record.reset_token_expires || null)
+      .input('securityQuestion', sql.NVarChar, record.security_question)
+      .input('securityAnswerHash', sql.NVarChar, record.security_answer_hash)
       .query(
         `UPDATE users
-         SET password_hash = @passwordHash, reset_token = @resetToken, reset_token_expires = @resetTokenExpires
+         SET name = @name, password_hash = @passwordHash,
+             security_question = @securityQuestion, security_answer_hash = @securityAnswerHash
          WHERE id = @id`
       );
     return;
@@ -221,71 +519,45 @@ async function replicateUser(record) {
     .input('name', sql.NVarChar, record.name)
     .input('email', sql.NVarChar, record.email)
     .input('passwordHash', sql.NVarChar, record.password_hash)
-    .input('resetToken', sql.NVarChar, record.reset_token || null)
-    .input('resetTokenExpires', sql.DateTime, record.reset_token_expires || null)
+    .input('securityQuestion', sql.NVarChar, record.security_question)
+    .input('securityAnswerHash', sql.NVarChar, record.security_answer_hash)
     .input('originCloud', sql.NVarChar, record.origin_cloud || 'aws')
     .query(
-      `INSERT INTO users (id, name, email, password_hash, reset_token, reset_token_expires, origin_cloud)
-       VALUES (@id, @name, @email, @passwordHash, @resetToken, @resetTokenExpires, @originCloud)`
+      `INSERT INTO users (id, name, email, password_hash, security_question, security_answer_hash, origin_cloud)
+       VALUES (@id, @name, @email, @passwordHash, @securityQuestion, @securityAnswerHash, @originCloud)`
     );
 }
 
-async function requestPasswordReset(email) {
-  const pool = await getPool();
+// returns null if no account exists for this email - see
+// lambda/layer/nodejs/db.js for the existence-disclosure reasoning
+async function getSecurityQuestion(email) {
   const user = await findUserByEmail(email);
-  if (!user) return;
-
-  const token = crypto.randomBytes(24).toString('hex');
-  const expires = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
-
-  await pool
-    .request()
-    .input('id', sql.UniqueIdentifier, user.id)
-    .input('resetToken', sql.NVarChar, token)
-    .input('resetTokenExpires', sql.DateTime, expires)
-    .query('UPDATE users SET reset_token = @resetToken, reset_token_expires = @resetTokenExpires WHERE id = @id');
-
-  await replicateToAws('/replicate/users', {
-    ...user,
-    reset_token: token,
-    reset_token_expires: expires,
-  });
-
-  await createNotification({
-    recipientEmail: email,
-    subject: 'Password reset requested',
-    body: `Use this code to reset your password: ${token}. It expires in 1 hour. If you didn't request this, you can ignore this message.`,
-    relatedBookingId: null,
-  });
+  if (!user) return null;
+  return user.security_question;
 }
 
-async function resetPassword({ email, code, newPasswordHash }) {
+async function resetPasswordWithAnswer({ email, newPasswordHash }) {
   const pool = await getPool();
   const user = await findUserByEmail(email);
-  if (!user || !user.reset_token || user.reset_token !== code) {
-    return false;
-  }
-  if (!user.reset_token_expires || new Date(user.reset_token_expires) < new Date()) {
-    return false;
-  }
+  if (!user) return false;
 
   await pool
     .request()
     .input('id', sql.UniqueIdentifier, user.id)
     .input('passwordHash', sql.NVarChar, newPasswordHash)
-    .query(
-      'UPDATE users SET password_hash = @passwordHash, reset_token = NULL, reset_token_expires = NULL WHERE id = @id'
-    );
+    .query('UPDATE users SET password_hash = @passwordHash WHERE id = @id');
 
   await replicateToAws('/replicate/users', {
     ...user,
     password_hash: newPasswordHash,
-    reset_token: null,
-    reset_token_expires: null,
   });
 
   return true;
 }
+
+// ---------------------------------------------------------------------
+// Payments (fake) and notifications (fake, not replicated) - unchanged
+// ---------------------------------------------------------------------
 
 async function createPayment({ bookingId, amount, currency, cardNumber }) {
   const id = crypto.randomUUID();
@@ -388,18 +660,26 @@ async function listNotifications() {
 
 module.exports = {
   createEvent,
-  createBooking,
-  replicateEvent,
-  replicateBooking,
   listEvents,
+  listMyEvents,
+  cancelEvent,
+  replicateEvent,
+  createBooking,
+  listMyBookings,
+  cancelBooking,
+  replicateBooking,
   createUser,
   findUserByEmail,
   findUserById,
+  findUserByIdWithPassword,
+  updateProfile,
+  changePassword,
   replicateUser,
-  requestPasswordReset,
-  resetPassword,
+  getSecurityQuestion,
+  resetPasswordWithAnswer,
   createPayment,
   replicatePayment,
   createNotification,
   listNotifications,
+  ValidationError,
 };

@@ -1,7 +1,8 @@
 const { app } = require('@azure/functions');
 const { createUser, findUserByEmail } = require('../db');
-const { hashPassword, signToken } = require('../auth');
+const { hashPassword, validatePassword, signToken } = require('../auth');
 
+// no email verification - see lambda/register/index.js
 app.http('register', {
   methods: ['POST'],
   authLevel: 'anonymous',
@@ -9,13 +10,22 @@ app.http('register', {
   handler: async (request, context) => {
     try {
       const body = await request.json();
-      const { name, email, password } = body;
+      const { name, email, password, securityQuestion, securityAnswer } = body;
 
-      if (!name || !email || !password) {
-        return { status: 400, jsonBody: { error: 'name, email, and password are all required' } };
+      if (!name || !email || !password || !securityQuestion || !securityAnswer) {
+        return {
+          status: 400,
+          jsonBody: {
+            error: 'name, email, password, securityQuestion, and securityAnswer are all required',
+          },
+        };
       }
-      if (password.length < 8) {
-        return { status: 400, jsonBody: { error: 'password must be at least 8 characters' } };
+      const passwordError = validatePassword(password);
+      if (passwordError) {
+        return { status: 400, jsonBody: { error: passwordError } };
+      }
+      if (securityAnswer.trim().length < 2) {
+        return { status: 400, jsonBody: { error: 'securityAnswer is too short' } };
       }
 
       const existing = await findUserByEmail(email);
@@ -24,7 +34,15 @@ app.http('register', {
       }
 
       const passwordHash = await hashPassword(password);
-      const user = await createUser({ name, email, passwordHash });
+      const securityAnswerHash = await hashPassword(securityAnswer.trim().toLowerCase());
+
+      const user = await createUser({
+        name,
+        email,
+        passwordHash,
+        securityQuestion,
+        securityAnswerHash,
+      });
       const token = signToken(user);
 
       return { status: 201, jsonBody: { user, token } };

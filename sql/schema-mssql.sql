@@ -1,20 +1,23 @@
 -- same UUID reasoning as schema-postgres.sql, generated app-side so both
 -- clouds get the same value. drops tables first, re-run when schema changes
 
-IF OBJECT_ID('FK_notifications_bookings', 'F') IS NOT NULL
-  ALTER TABLE notifications DROP CONSTRAINT FK_notifications_bookings;
-
 IF OBJECT_ID('FK_payments_bookings', 'F') IS NOT NULL
   ALTER TABLE payments DROP CONSTRAINT FK_payments_bookings;
 
 IF OBJECT_ID('FK_bookings_events', 'F') IS NOT NULL
   ALTER TABLE bookings DROP CONSTRAINT FK_bookings_events;
 
-IF OBJECT_ID('notifications', 'U') IS NOT NULL
-  DROP TABLE notifications;
+IF OBJECT_ID('FK_bookings_users', 'F') IS NOT NULL
+  ALTER TABLE bookings DROP CONSTRAINT FK_bookings_users;
+
+IF OBJECT_ID('FK_events_users', 'F') IS NOT NULL
+  ALTER TABLE events DROP CONSTRAINT FK_events_users;
 
 IF OBJECT_ID('payments', 'U') IS NOT NULL
   DROP TABLE payments;
+
+IF OBJECT_ID('notifications', 'U') IS NOT NULL
+  DROP TABLE notifications;
 
 IF OBJECT_ID('bookings', 'U') IS NOT NULL
   DROP TABLE bookings;
@@ -30,31 +33,40 @@ CREATE TABLE users (
   name NVARCHAR(255) NOT NULL,
   email NVARCHAR(255) NOT NULL UNIQUE,
   password_hash NVARCHAR(255) NOT NULL,
-  reset_token NVARCHAR(255),
-  reset_token_expires DATETIME,
+  security_question NVARCHAR(255) NOT NULL,
+  security_answer_hash NVARCHAR(255) NOT NULL,
   created_at DATETIME NOT NULL DEFAULT GETDATE(),
   origin_cloud NVARCHAR(10) NOT NULL DEFAULT 'azure'
 );
 
+-- see schema-postgres.sql for why user_id and cancelled_at exist
 CREATE TABLE events (
   id UNIQUEIDENTIFIER PRIMARY KEY,
+  user_id UNIQUEIDENTIFIER NOT NULL,
   title NVARCHAR(255) NOT NULL,
   event_date DATETIME NOT NULL,
   location NVARCHAR(255) NOT NULL,
   capacity INT NOT NULL DEFAULT 0,
-  origin_cloud NVARCHAR(10) NOT NULL DEFAULT 'azure'
+  price DECIMAL(10, 2) NOT NULL DEFAULT 0,
+  cancelled_at DATETIME,
+  origin_cloud NVARCHAR(10) NOT NULL DEFAULT 'azure',
+  CONSTRAINT FK_events_users FOREIGN KEY (user_id) REFERENCES users(id)
 );
 
 CREATE TABLE bookings (
   id UNIQUEIDENTIFIER PRIMARY KEY,
+  user_id UNIQUEIDENTIFIER NOT NULL,
   event_id UNIQUEIDENTIFIER NOT NULL,
   attendee_name NVARCHAR(255) NOT NULL,
   attendee_email NVARCHAR(255) NOT NULL,
+  cancelled_at DATETIME,
   created_at DATETIME NOT NULL DEFAULT GETDATE(),
   origin_cloud NVARCHAR(10) NOT NULL DEFAULT 'azure',
-  CONSTRAINT FK_bookings_events FOREIGN KEY (event_id) REFERENCES events(id)
+  CONSTRAINT FK_bookings_events FOREIGN KEY (event_id) REFERENCES events(id),
+  CONSTRAINT FK_bookings_users FOREIGN KEY (user_id) REFERENCES users(id)
 );
 
+-- fake payments, see sql/schema-postgres.sql
 CREATE TABLE payments (
   id UNIQUEIDENTIFIER PRIMARY KEY,
   booking_id UNIQUEIDENTIFIER NOT NULL,
@@ -75,6 +87,5 @@ CREATE TABLE notifications (
   related_booking_id UNIQUEIDENTIFIER,
   status NVARCHAR(20) NOT NULL DEFAULT 'sent',
   created_at DATETIME NOT NULL DEFAULT GETDATE(),
-  origin_cloud NVARCHAR(10) NOT NULL DEFAULT 'azure',
-  CONSTRAINT FK_notifications_bookings FOREIGN KEY (related_booking_id) REFERENCES bookings(id)
+  origin_cloud NVARCHAR(10) NOT NULL DEFAULT 'azure'
 );

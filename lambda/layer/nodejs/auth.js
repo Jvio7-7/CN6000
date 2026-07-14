@@ -30,4 +30,24 @@ function verifyToken(authHeader) {
   }
 }
 
-module.exports = { hashPassword, verifyPassword, signToken, verifyToken };
+// 12-24 chars, at least one uppercase, one lowercase, one digit, one
+// special character. Used for register, reset-password, and
+// change-password alike so the rule can't be bypassed via one of them.
+function validatePassword(password) {
+  if (typeof password !== 'string' || password.length < 12 || password.length > 24) {
+    return 'Password must be 12-24 characters long';
+  }
+  if (!/[A-Z]/.test(password)) return 'Password must include an uppercase letter';
+  if (!/[a-z]/.test(password)) return 'Password must include a lowercase letter';
+  if (!/[0-9]/.test(password)) return 'Password must include a number';
+  if (!/[^A-Za-z0-9]/.test(password)) return 'Password must include a special character';
+  return null; // null = valid
+}
+
+module.exports = {
+  hashPassword,
+  verifyPassword,
+  signToken,
+  verifyToken,
+  validatePassword,
+};

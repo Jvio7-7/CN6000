@@ -17,6 +17,7 @@ interface AuthContextValue {
   token: string | null;
   loading: boolean;
   setSession: (user: UserRecord, token: string) => void;
+  updateUser: (user: UserRecord) => void;
   logout: () => void;
 }
 
@@ -25,6 +26,7 @@ const AuthContext = createContext<AuthContextValue>({
   token: null,
   loading: true,
   setSession: () => {},
+  updateUser: () => {},
   logout: () => {},
 });
 
@@ -63,6 +65,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setToken(newToken);
   }
 
+  // for profile edits - keeps the header/account UI in sync without a
+  // full page reload or re-fetching /users/me
+  function updateUser(updated: UserRecord) {
+    setUser(updated);
+  }
+
   function logout() {
     localStorage.removeItem('token');
     setUser(null);
@@ -70,7 +78,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, token, loading, setSession, logout }}>
+    <AuthContext.Provider value={{ user, token, loading, setSession, updateUser, logout }}>
       {children}
     </AuthContext.Provider>
   );

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { API_BASE_URL } from '@/lib/auth-context';
 import EventCard from '@/components/EventCard';
@@ -11,12 +11,15 @@ interface EventRecord {
   event_date: string;
   location: string;
   capacity: number;
+  price: number;
+  booking_count: number;
 }
 
 export default function Home() {
   const [events, setEvents] = useState<EventRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [showOld, setShowOld] = useState(false);
 
   useEffect(() => {
     if (!API_BASE_URL) {
@@ -30,6 +33,16 @@ export default function Home() {
       .catch(() => setError('Could not load events right now.'))
       .finally(() => setLoading(false));
   }, []);
+
+  const { upcoming, past } = useMemo(() => {
+    const now = new Date();
+    const upcoming: EventRecord[] = [];
+    const past: EventRecord[] = [];
+    for (const ev of events) {
+      (new Date(ev.event_date) >= now ? upcoming : past).push(ev);
+    }
+    return { upcoming, past };
+  }, [events]);
 
   return (
     <div className="shell">
@@ -54,15 +67,15 @@ export default function Home() {
 
       {!error && loading && <div className="emptyState">Loading events…</div>}
 
-      {!error && !loading && events.length === 0 && (
+      {!error && !loading && upcoming.length === 0 && (
         <div className="emptyState">
-          Nothing&apos;s been posted yet. Be the first to host something.
+          Nothing&apos;s coming up yet. Be the first to host something.
         </div>
       )}
 
-      {!error && !loading && events.length > 0 && (
+      {!error && !loading && upcoming.length > 0 && (
         <div className="ticketGrid">
-          {events.map((ev) => (
+          {upcoming.map((ev) => (
             <EventCard
               key={ev.id}
               id={ev.id}
@@ -70,9 +83,38 @@ export default function Home() {
               eventDate={ev.event_date}
               location={ev.location}
               capacity={ev.capacity}
+              price={Number(ev.price)}
+              bookingCount={Number(ev.booking_count)}
             />
           ))}
         </div>
+      )}
+
+      {!error && !loading && past.length > 0 && (
+        <>
+          <div className="sectionHead">
+            <h2 className="sectionTitle">Old events</h2>
+            <button className="linkQuiet" onClick={() => setShowOld(!showOld)}>
+              {showOld ? 'Hide' : `Show ${past.length}`}
+            </button>
+          </div>
+          {showOld && (
+            <div className="ticketGrid">
+              {past.map((ev) => (
+                <EventCard
+                  key={ev.id}
+                  id={ev.id}
+                  title={ev.title}
+                  eventDate={ev.event_date}
+                  location={ev.location}
+                  capacity={ev.capacity}
+                  price={Number(ev.price)}
+                  bookingCount={Number(ev.booking_count)}
+                />
+              ))}
+            </div>
+          )}
+        </>
       )}
     </div>
   );

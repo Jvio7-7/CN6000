@@ -2,7 +2,7 @@ terraform {
   required_providers {
     azurerm = {
       source  = "hashicorp/azurerm"
-      version = "~> 3.0"
+      version = "~> 4.0"
     }
     random = {
       source  = "hashicorp/random"
@@ -21,8 +21,14 @@ terraform {
 
 provider "azurerm" {
   features {}
-  subscription_id            = var.subscription_id
-  skip_provider_registration = true
+  subscription_id = var.subscription_id
+  # "none" = exact equivalent of the old skip_provider_registration = true -
+  # every resource provider this project needs was already registered on
+  # the subscription during the original v3 deployment, and registration
+  # is a subscription-level state that persists regardless of what this
+  # setting is, so this preserves existing behaviour rather than opting
+  # into v4's new auto-registration modes untested
+  resource_provider_registrations = "none"
 }
 
 # random suffix so names don't clash with other students
@@ -75,7 +81,7 @@ resource "azurerm_linux_function_app" "main" {
 
   site_config {
     application_stack {
-      node_version = "20"
+      node_version = "22"
     }
     cors {
       allowed_origins = ["*"]

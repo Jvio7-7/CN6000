@@ -91,6 +91,7 @@ resource "aws_lambda_function" "create_event" {
     variables = {
       DATABASE_URL   = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
       AZURE_BASE_URL = var.azure_base_url
+      JWT_SECRET     = var.jwt_secret
     }
   }
 }
@@ -109,6 +110,7 @@ resource "aws_lambda_function" "book_event" {
     variables = {
       DATABASE_URL   = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
       AZURE_BASE_URL = var.azure_base_url
+      JWT_SECRET     = var.jwt_secret
     }
   }
 }
@@ -269,8 +271,7 @@ resource "aws_lambda_function" "forgot_password" {
 
   environment {
     variables = {
-      DATABASE_URL   = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
-      AZURE_BASE_URL = var.azure_base_url
+      DATABASE_URL = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
     }
   }
 }
@@ -289,6 +290,123 @@ resource "aws_lambda_function" "reset_password" {
     variables = {
       DATABASE_URL   = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
       AZURE_BASE_URL = var.azure_base_url
+    }
+  }
+}
+
+# -------------------------------------------------------------------------
+# Profile edit, password change, and ownership-based cancel/list for
+# events and bookings
+# -------------------------------------------------------------------------
+
+resource "aws_lambda_function" "update_profile" {
+  function_name    = "${var.project_name}-update-profile"
+  filename         = "${path.module}/../../lambda/update-profile.zip"
+  source_code_hash = filebase64sha256("${path.module}/../../lambda/update-profile.zip")
+  handler          = "index.handler"
+  runtime          = "nodejs22.x"
+  role             = aws_iam_role.lambda_exec.arn
+  layers           = [aws_lambda_layer_version.db_layer.arn]
+  timeout          = 10
+
+  environment {
+    variables = {
+      DATABASE_URL   = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
+      AZURE_BASE_URL = var.azure_base_url
+      JWT_SECRET     = var.jwt_secret
+    }
+  }
+}
+
+resource "aws_lambda_function" "change_password" {
+  function_name    = "${var.project_name}-change-password"
+  filename         = "${path.module}/../../lambda/change-password.zip"
+  source_code_hash = filebase64sha256("${path.module}/../../lambda/change-password.zip")
+  handler          = "index.handler"
+  runtime          = "nodejs22.x"
+  role             = aws_iam_role.lambda_exec.arn
+  layers           = [aws_lambda_layer_version.db_layer.arn]
+  timeout          = 10
+
+  environment {
+    variables = {
+      DATABASE_URL   = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
+      AZURE_BASE_URL = var.azure_base_url
+      JWT_SECRET     = var.jwt_secret
+    }
+  }
+}
+
+resource "aws_lambda_function" "cancel_event" {
+  function_name    = "${var.project_name}-cancel-event"
+  filename         = "${path.module}/../../lambda/cancel-event.zip"
+  source_code_hash = filebase64sha256("${path.module}/../../lambda/cancel-event.zip")
+  handler          = "index.handler"
+  runtime          = "nodejs22.x"
+  role             = aws_iam_role.lambda_exec.arn
+  layers           = [aws_lambda_layer_version.db_layer.arn]
+  timeout          = 10
+
+  environment {
+    variables = {
+      DATABASE_URL   = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
+      AZURE_BASE_URL = var.azure_base_url
+      JWT_SECRET     = var.jwt_secret
+    }
+  }
+}
+
+resource "aws_lambda_function" "cancel_booking" {
+  function_name    = "${var.project_name}-cancel-booking"
+  filename         = "${path.module}/../../lambda/cancel-booking.zip"
+  source_code_hash = filebase64sha256("${path.module}/../../lambda/cancel-booking.zip")
+  handler          = "index.handler"
+  runtime          = "nodejs22.x"
+  role             = aws_iam_role.lambda_exec.arn
+  layers           = [aws_lambda_layer_version.db_layer.arn]
+  timeout          = 10
+
+  environment {
+    variables = {
+      DATABASE_URL   = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
+      AZURE_BASE_URL = var.azure_base_url
+      JWT_SECRET     = var.jwt_secret
+    }
+  }
+}
+
+resource "aws_lambda_function" "my_events" {
+  function_name    = "${var.project_name}-my-events"
+  filename         = "${path.module}/../../lambda/my-events.zip"
+  source_code_hash = filebase64sha256("${path.module}/../../lambda/my-events.zip")
+  handler          = "index.handler"
+  runtime          = "nodejs22.x"
+  role             = aws_iam_role.lambda_exec.arn
+  layers           = [aws_lambda_layer_version.db_layer.arn]
+  timeout          = 10
+
+  environment {
+    variables = {
+      DATABASE_URL = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
+      JWT_SECRET   = var.jwt_secret
+    }
+  }
+}
+
+resource "aws_lambda_function" "my_bookings" {
+  function_name    = "${var.project_name}-my-bookings"
+  filename         = "${path.module}/../../lambda/my-bookings.zip"
+  source_code_hash = filebase64sha256("${path.module}/../../lambda/my-bookings.zip")
+  handler          = "index.handler"
+  runtime          = "nodejs22.x"
+  role             = aws_iam_role.lambda_exec.arn
+  layers           = [aws_lambda_layer_version.db_layer.arn]
+  timeout          = 10
+
+  environment {
+    variables = {
+      DATABASE_URL = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
+      JWT_SECRET   = var.jwt_secret
     }
   }
 }
@@ -357,7 +475,7 @@ resource "aws_apigatewayv2_api" "http_api" {
 
   cors_configuration {
     allow_origins = ["*"]
-    allow_methods = ["GET", "POST", "OPTIONS"]
+    allow_methods = ["GET", "POST", "PATCH", "OPTIONS"]
     allow_headers = ["content-type", "authorization"]
   }
 }
@@ -452,6 +570,48 @@ resource "aws_apigatewayv2_integration" "reset_password" {
   payload_format_version = "2.0"
 }
 
+resource "aws_apigatewayv2_integration" "update_profile" {
+  api_id                 = aws_apigatewayv2_api.http_api.id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = aws_lambda_function.update_profile.invoke_arn
+  payload_format_version = "2.0"
+}
+
+resource "aws_apigatewayv2_integration" "change_password" {
+  api_id                 = aws_apigatewayv2_api.http_api.id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = aws_lambda_function.change_password.invoke_arn
+  payload_format_version = "2.0"
+}
+
+resource "aws_apigatewayv2_integration" "cancel_event" {
+  api_id                 = aws_apigatewayv2_api.http_api.id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = aws_lambda_function.cancel_event.invoke_arn
+  payload_format_version = "2.0"
+}
+
+resource "aws_apigatewayv2_integration" "cancel_booking" {
+  api_id                 = aws_apigatewayv2_api.http_api.id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = aws_lambda_function.cancel_booking.invoke_arn
+  payload_format_version = "2.0"
+}
+
+resource "aws_apigatewayv2_integration" "my_events" {
+  api_id                 = aws_apigatewayv2_api.http_api.id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = aws_lambda_function.my_events.invoke_arn
+  payload_format_version = "2.0"
+}
+
+resource "aws_apigatewayv2_integration" "my_bookings" {
+  api_id                 = aws_apigatewayv2_api.http_api.id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = aws_lambda_function.my_bookings.invoke_arn
+  payload_format_version = "2.0"
+}
+
 resource "aws_apigatewayv2_integration" "payments" {
   api_id                 = aws_apigatewayv2_api.http_api.id
   integration_type       = "AWS_PROXY"
@@ -543,6 +703,42 @@ resource "aws_apigatewayv2_route" "reset_password" {
   api_id    = aws_apigatewayv2_api.http_api.id
   route_key = "POST /users/reset-password"
   target    = "integrations/${aws_apigatewayv2_integration.reset_password.id}"
+}
+
+resource "aws_apigatewayv2_route" "update_profile" {
+  api_id    = aws_apigatewayv2_api.http_api.id
+  route_key = "PATCH /users/me"
+  target    = "integrations/${aws_apigatewayv2_integration.update_profile.id}"
+}
+
+resource "aws_apigatewayv2_route" "change_password" {
+  api_id    = aws_apigatewayv2_api.http_api.id
+  route_key = "POST /users/change-password"
+  target    = "integrations/${aws_apigatewayv2_integration.change_password.id}"
+}
+
+resource "aws_apigatewayv2_route" "cancel_event" {
+  api_id    = aws_apigatewayv2_api.http_api.id
+  route_key = "POST /events/{id}/cancel"
+  target    = "integrations/${aws_apigatewayv2_integration.cancel_event.id}"
+}
+
+resource "aws_apigatewayv2_route" "cancel_booking" {
+  api_id    = aws_apigatewayv2_api.http_api.id
+  route_key = "POST /bookings/{id}/cancel"
+  target    = "integrations/${aws_apigatewayv2_integration.cancel_booking.id}"
+}
+
+resource "aws_apigatewayv2_route" "my_events" {
+  api_id    = aws_apigatewayv2_api.http_api.id
+  route_key = "GET /users/me/events"
+  target    = "integrations/${aws_apigatewayv2_integration.my_events.id}"
+}
+
+resource "aws_apigatewayv2_route" "my_bookings" {
+  api_id    = aws_apigatewayv2_api.http_api.id
+  route_key = "GET /users/me/bookings"
+  target    = "integrations/${aws_apigatewayv2_integration.my_bookings.id}"
 }
 
 resource "aws_apigatewayv2_route" "payments" {
@@ -679,6 +875,54 @@ resource "aws_lambda_permission" "reset_password_apigw" {
   statement_id  = "AllowAPIGatewayInvokeResetPassword"
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.reset_password.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.http_api.execution_arn}/*/*"
+}
+
+resource "aws_lambda_permission" "update_profile_apigw" {
+  statement_id  = "AllowAPIGatewayInvokeUpdateProfile"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.update_profile.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.http_api.execution_arn}/*/*"
+}
+
+resource "aws_lambda_permission" "change_password_apigw" {
+  statement_id  = "AllowAPIGatewayInvokeChangePassword"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.change_password.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.http_api.execution_arn}/*/*"
+}
+
+resource "aws_lambda_permission" "cancel_event_apigw" {
+  statement_id  = "AllowAPIGatewayInvokeCancelEvent"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.cancel_event.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.http_api.execution_arn}/*/*"
+}
+
+resource "aws_lambda_permission" "cancel_booking_apigw" {
+  statement_id  = "AllowAPIGatewayInvokeCancelBooking"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.cancel_booking.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.http_api.execution_arn}/*/*"
+}
+
+resource "aws_lambda_permission" "my_events_apigw" {
+  statement_id  = "AllowAPIGatewayInvokeMyEvents"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.my_events.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.http_api.execution_arn}/*/*"
+}
+
+resource "aws_lambda_permission" "my_bookings_apigw" {
+  statement_id  = "AllowAPIGatewayInvokeMyBookings"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.my_bookings.function_name
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${aws_apigatewayv2_api.http_api.execution_arn}/*/*"
 }

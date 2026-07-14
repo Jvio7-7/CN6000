@@ -4,11 +4,19 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { API_BASE_URL, useAuth } from '@/lib/auth-context';
+import { validatePasswordClient, PASSWORD_HINT } from '@/lib/validation';
 
 export default function RegisterPage() {
   const router = useRouter();
   const { setSession } = useAuth();
-  const [form, setForm] = useState({ name: '', email: '', password: '', confirmPassword: '' });
+  const [form, setForm] = useState({
+    name: '',
+    email: '',
+    password: '',
+    confirmPassword: '',
+    securityQuestion: '',
+    securityAnswer: '',
+  });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -20,12 +28,17 @@ export default function RegisterPage() {
       setError('NEXT_PUBLIC_API_BASE_URL is not set — see .env.local');
       return;
     }
-    if (form.password.length < 8) {
-      setError('Password must be at least 8 characters.');
+    const passwordError = validatePasswordClient(form.password);
+    if (passwordError) {
+      setError(passwordError);
       return;
     }
     if (form.password !== form.confirmPassword) {
       setError('Passwords don\u2019t match.');
+      return;
+    }
+    if (form.securityAnswer.trim().length < 2) {
+      setError('Security answer is too short.');
       return;
     }
 
@@ -34,7 +47,13 @@ export default function RegisterPage() {
       const res = await fetch(`${API_BASE_URL}/users/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: form.name, email: form.email, password: form.password }),
+        body: JSON.stringify({
+          name: form.name,
+          email: form.email,
+          password: form.password,
+          securityQuestion: form.securityQuestion,
+          securityAnswer: form.securityAnswer,
+        }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -87,11 +106,13 @@ export default function RegisterPage() {
             id="password"
             type="password"
             required
-            minLength={8}
+            minLength={12}
+            maxLength={24}
             value={form.password}
             onChange={(e) => setForm({ ...form, password: e.target.value })}
-            placeholder="At least 8 characters"
+            placeholder="At least 12 characters"
           />
+          <span className="fieldHint">{PASSWORD_HINT}</span>
         </div>
 
         <div className="field">
@@ -100,10 +121,36 @@ export default function RegisterPage() {
             id="confirmPassword"
             type="password"
             required
-            minLength={8}
+            minLength={12}
+            maxLength={24}
             value={form.confirmPassword}
             onChange={(e) => setForm({ ...form, confirmPassword: e.target.value })}
             placeholder="Type it again"
+          />
+        </div>
+
+        <div className="field">
+          <label htmlFor="securityQuestion">Security question</label>
+          <input
+            id="securityQuestion"
+            required
+            value={form.securityQuestion}
+            onChange={(e) => setForm({ ...form, securityQuestion: e.target.value })}
+            placeholder="What was your first pet's name?"
+          />
+          <span className="fieldHint">
+            Used to reset your password if you forget it — write one only you&apos;d know the answer to.
+          </span>
+        </div>
+
+        <div className="field">
+          <label htmlFor="securityAnswer">Answer</label>
+          <input
+            id="securityAnswer"
+            required
+            value={form.securityAnswer}
+            onChange={(e) => setForm({ ...form, securityAnswer: e.target.value })}
+            placeholder="Your answer"
           />
         </div>
 

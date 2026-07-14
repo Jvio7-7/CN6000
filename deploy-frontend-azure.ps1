@@ -17,6 +17,14 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
+# az storage blob upload-batch only adds/overwrites, it never deletes -
+# unlike aws s3 sync --delete on the AWS side. Clearing first avoids
+# stale orphaned blobs building up (this bit us once already, when the
+# output structure changed from flat account.html to account/index.html
+# and the old flat files just kept sitting there unreferenced).
+Write-Host "Clearing old files from `$web container..."
+az storage blob delete-batch --account-name $StorageAccountName --source '$web' | Out-Null
+
 Write-Host "Uploading to `$web container on $StorageAccountName ..."
 az storage blob upload-batch `
     --account-name $StorageAccountName `

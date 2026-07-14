@@ -1,6 +1,11 @@
 const { Pool } = require('pg');
 const crypto = require('crypto');
 
+// thrown for things like "event is full" or "already booked" - handlers
+// catch this specifically and respond 400/409, not the generic 500 they
+// give everything else
+class ValidationError extends Error {}
+
 // AWS side. Every write: generate a UUID, write to RDS, replicate to Azure.
 // awaited, not fire-and-forget - Lambda kills any async work still running
 // after the handler returns, so a background fetch just never finishes.
@@ -42,14 +47,28 @@ async function replicateToAzure(path, payload) {
   }
 }
 
-async function createEvent({ title, date, location, capacity }) {
+// ---------------------------------------------------------------------
+// Events - now owned by the user who created them (userId required),
+// with a soft-delete (cancelled_at) instead of a hard DELETE, since
+// bookings/payments reference the event by foreign key.
+// ---------------------------------------------------------------------
+
+async function createEvent({ userId, title, date, location, capacity, price }) {
+  if (new Date(date) <= new Date()) {
+    throw new ValidationError('Event date must be in the future');
+  }
+  const priceNum = Number(price) || 0;
+  if (priceNum < 0) {
+    throw new ValidationError('Price can\u2019t be negative');
+  }
+
   const id = crypto.randomUUID();
   const db = getPool();
   const result = await db.query(
-    `INSERT INTO events (id, title, event_date, location, capacity, origin_cloud)
-     VALUES ($1, $2, $3, $4, $5, 'aws')
-     RETURNING id, title, event_date, location, capacity, origin_cloud`,
-    [id, title, date, location, capacity]
+    `INSERT INTO events (id, user_id, title, event_date, location, capacity, price, origin_cloud)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, 'aws')
+     RETURNING id, user_id, title, event_date, location, capacity, price, cancelled_at, origin_cloud`,
+    [id, userId, title, date, location, capacity, priceNum]
   );
   const record = result.rows[0];
 
@@ -58,14 +77,154 @@ async function createEvent({ title, date, location, capacity }) {
   return record;
 }
 
-async function createBooking({ eventId, attendeeName, attendeeEmail }) {
-  const id = crypto.randomUUID();
+// booking_count is a live count of non-cancelled bookings, not a stored
+// column - simpler than keeping a counter in sync, and this list is
+// never large enough for the subquery to matter
+async function listEvents() {
   const db = getPool();
   const result = await db.query(
-    `INSERT INTO bookings (id, event_id, attendee_name, attendee_email, origin_cloud)
-     VALUES ($1, $2, $3, $4, 'aws')
-     RETURNING id, event_id, attendee_name, attendee_email, created_at, origin_cloud`,
-    [id, eventId, attendeeName, attendeeEmail]
+    `SELECT e.id, e.title, e.event_date, e.location, e.capacity, e.price, e.origin_cloud,
+            (SELECT COUNT(*) FROM bookings b WHERE b.event_id = e.id AND b.cancelled_at IS NULL) AS booking_count
+     FROM events e
+     WHERE e.cancelled_at IS NULL
+     ORDER BY e.event_date ASC`
+  );
+  return result.rows;
+}
+
+async function listMyEvents(userId) {
+  const db = getPool();
+  const result = await db.query(
+    `SELECT id, title, event_date, location, capacity, price, cancelled_at, origin_cloud
+     FROM events
+     WHERE user_id = $1
+     ORDER BY event_date DESC`,
+    [userId]
+  );
+  return result.rows;
+}
+
+// Returns null if the event doesn't exist or isn't owned by this user -
+// caller turns that into a 404, not a 500. Cascades: every active
+// booking against this event gets cancelled too, and anyone with a
+// completed payment gets a (simulated) refund notification - there's no
+// real payment processor, so this is exactly what "refund" means here.
+async function cancelEvent(eventId, userId) {
+  const db = getPool();
+  const result = await db.query(
+    `UPDATE events SET cancelled_at = NOW()
+     WHERE id = $1 AND user_id = $2 AND cancelled_at IS NULL
+     RETURNING id, user_id, title, event_date, location, capacity, price, cancelled_at, origin_cloud`,
+    [eventId, userId]
+  );
+  const record = result.rows[0];
+  if (!record) return null;
+
+  await replicateToAzure('/replicate/events', record);
+
+  const bookings = await db.query(
+    `SELECT id, attendee_name, attendee_email FROM bookings WHERE event_id = $1 AND cancelled_at IS NULL`,
+    [eventId]
+  );
+
+  for (const booking of bookings.rows) {
+    const cancelled = await cancelBookingInternal(booking.id);
+    if (!cancelled) continue;
+
+    const payment = await db.query(
+      `SELECT id FROM payments WHERE booking_id = $1 AND status = 'completed' ORDER BY created_at DESC LIMIT 1`,
+      [booking.id]
+    );
+
+    try {
+      if (payment.rows[0]) {
+        await createNotification({
+          recipientEmail: booking.attendee_email,
+          subject: 'Event cancelled \u2014 refund issued',
+          body: `${record.title} was cancelled by the host. Your payment has been refunded.`,
+          relatedBookingId: booking.id,
+        });
+      } else {
+        await createNotification({
+          recipientEmail: booking.attendee_email,
+          subject: 'Event cancelled',
+          body: `${record.title} was cancelled by the host.`,
+          relatedBookingId: booking.id,
+        });
+      }
+    } catch (err) {
+      console.error('cancellation notification failed:', err);
+    }
+  }
+
+  return record;
+}
+
+// upsert, not insert-or-skip - a cancellation on the other cloud needs to
+// update the row here too, not just be ignored because the id already exists
+async function replicateEvent(record) {
+  const db = getPool();
+  await db.query(
+    `INSERT INTO events (id, user_id, title, event_date, location, capacity, price, cancelled_at, origin_cloud)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+     ON CONFLICT (id) DO UPDATE SET
+       title = EXCLUDED.title,
+       event_date = EXCLUDED.event_date,
+       location = EXCLUDED.location,
+       capacity = EXCLUDED.capacity,
+       price = EXCLUDED.price,
+       cancelled_at = EXCLUDED.cancelled_at`,
+    [
+      record.id,
+      record.user_id,
+      record.title,
+      record.event_date,
+      record.location,
+      record.capacity,
+      record.price || 0,
+      record.cancelled_at || null,
+      record.origin_cloud || 'azure',
+    ]
+  );
+}
+
+// ---------------------------------------------------------------------
+// Bookings - same ownership + soft-delete pattern as events
+// ---------------------------------------------------------------------
+
+async function createBooking({ userId, eventId, attendeeName, attendeeEmail }) {
+  const db = getPool();
+
+  const dup = await db.query(
+    `SELECT id FROM bookings WHERE user_id = $1 AND event_id = $2 AND cancelled_at IS NULL`,
+    [userId, eventId]
+  );
+  if (dup.rows[0]) {
+    throw new ValidationError('You\u2019ve already booked a spot for this event');
+  }
+
+  const eventResult = await db.query('SELECT user_id, capacity FROM events WHERE id = $1', [eventId]);
+  const event = eventResult.rows[0];
+  if (!event) {
+    throw new ValidationError('Event not found');
+  }
+  if (event.user_id.toLowerCase() === userId.toLowerCase()) {
+    throw new ValidationError('You can\u2019t book your own event');
+  }
+  const countResult = await db.query(
+    `SELECT COUNT(*) AS count FROM bookings WHERE event_id = $1 AND cancelled_at IS NULL`,
+    [eventId]
+  );
+  if (Number(countResult.rows[0].count) >= event.capacity) {
+    throw new ValidationError('This event is full');
+  }
+
+  const id = crypto.randomUUID();
+  const result = await db.query(
+    `INSERT INTO bookings (id, user_id, event_id, attendee_name, attendee_email, origin_cloud)
+     VALUES ($1, $2, $3, $4, $5, 'aws')
+     RETURNING id, user_id, event_id, attendee_name, attendee_email, cancelled_at, created_at, origin_cloud`,
+    [id, userId, eventId, attendeeName, attendeeEmail]
   );
   const record = result.rows[0];
 
@@ -85,56 +244,116 @@ async function createBooking({ eventId, attendeeName, attendeeEmail }) {
   return record;
 }
 
-// ON CONFLICT DO NOTHING so a retried replication request doesn't error out
-async function replicateEvent(record) {
+async function listMyBookings(userId) {
   const db = getPool();
-  await db.query(
-    `INSERT INTO events (id, title, event_date, location, capacity, origin_cloud)
-     VALUES ($1, $2, $3, $4, $5, $6)
-     ON CONFLICT (id) DO NOTHING`,
-    [record.id, record.title, record.event_date, record.location, record.capacity, record.origin_cloud || 'azure']
+  const result = await db.query(
+    `SELECT b.id, b.event_id, b.attendee_name, b.attendee_email, b.cancelled_at, b.created_at, b.origin_cloud,
+            e.title AS event_title, e.event_date
+     FROM bookings b
+     JOIN events e ON e.id = b.event_id
+     WHERE b.user_id = $1
+     ORDER BY b.created_at DESC`,
+    [userId]
   );
+  return result.rows;
+}
+
+// shared core used both by the participant's own cancel request (which
+// checks ownership) and by cancelEvent's cascade (which doesn't - the
+// event owner is cancelling on their behalf)
+async function cancelBookingInternal(bookingId, userId = null) {
+  const db = getPool();
+  const conditions = userId ? 'id = $1 AND user_id = $2 AND cancelled_at IS NULL' : 'id = $1 AND cancelled_at IS NULL';
+  const params = userId ? [bookingId, userId] : [bookingId];
+
+  const result = await db.query(
+    `UPDATE bookings SET cancelled_at = NOW()
+     WHERE ${conditions}
+     RETURNING id, user_id, event_id, attendee_name, attendee_email, cancelled_at, created_at, origin_cloud`,
+    params
+  );
+  const record = result.rows[0];
+  if (!record) return null;
+
+  await replicateToAzure('/replicate/bookings', record);
+  return record;
+}
+
+// participant cancelling their own booking - sends a refund notification
+// if they'd actually paid (nothing to refund otherwise)
+async function cancelBooking(bookingId, userId) {
+  const record = await cancelBookingInternal(bookingId, userId);
+  if (!record) return null;
+
+  const db = getPool();
+  const payment = await db.query(
+    `SELECT id, amount, currency FROM payments WHERE booking_id = $1 AND status = 'completed' ORDER BY created_at DESC LIMIT 1`,
+    [bookingId]
+  );
+
+  if (payment.rows[0]) {
+    try {
+      const p = payment.rows[0];
+      await createNotification({
+        recipientEmail: record.attendee_email,
+        subject: 'Booking cancelled \u2014 refund issued',
+        body: `Your booking was cancelled and your payment of ${p.currency} ${p.amount} has been refunded.`,
+        relatedBookingId: bookingId,
+      });
+    } catch (err) {
+      console.error('refund notification failed:', err);
+    }
+  }
+
+  return record;
 }
 
 async function replicateBooking(record) {
   const db = getPool();
   await db.query(
-    `INSERT INTO bookings (id, event_id, attendee_name, attendee_email, created_at, origin_cloud)
-     VALUES ($1, $2, $3, $4, $5, $6)
-     ON CONFLICT (id) DO NOTHING`,
+    `INSERT INTO bookings (id, user_id, event_id, attendee_name, attendee_email, cancelled_at, created_at, origin_cloud)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+     ON CONFLICT (id) DO UPDATE SET
+       attendee_name = EXCLUDED.attendee_name,
+       attendee_email = EXCLUDED.attendee_email,
+       cancelled_at = EXCLUDED.cancelled_at`,
     [
       record.id,
+      record.user_id,
       record.event_id,
       record.attendee_name,
       record.attendee_email,
+      record.cancelled_at || null,
       record.created_at,
       record.origin_cloud || 'azure',
     ]
   );
 }
 
-async function listEvents() {
-  const db = getPool();
-  const result = await db.query(
-    `SELECT id, title, event_date, location, capacity, origin_cloud
-     FROM events
-     ORDER BY event_date ASC`
-  );
-  return result.rows;
-}
+// ---------------------------------------------------------------------
+// Users - registration, profile edit, password change/reset
+// ---------------------------------------------------------------------
 
-async function createUser({ name, email, passwordHash }) {
+// no email verification anymore - see README for why (SES sandbox mode
+// needs a domain we don't have to ever get past). Account is usable
+// immediately, same as before that was ever added.
+async function createUser({ name, email, passwordHash, securityQuestion, securityAnswerHash }) {
   const id = crypto.randomUUID();
   const db = getPool();
   const result = await db.query(
-    `INSERT INTO users (id, name, email, password_hash, origin_cloud)
-     VALUES ($1, $2, $3, $4, 'aws')
+    `INSERT INTO users (id, name, email, password_hash, security_question, security_answer_hash, origin_cloud)
+     VALUES ($1, $2, $3, $4, $5, $6, 'aws')
      RETURNING id, name, email, created_at, origin_cloud`,
-    [id, name, email, passwordHash]
+    [id, name, email, passwordHash, securityQuestion, securityAnswerHash]
   );
   const record = result.rows[0];
 
-  await replicateToAzure('/replicate/users', { ...record, password_hash: passwordHash });
+  await replicateToAzure('/replicate/users', {
+    ...record,
+    password_hash: passwordHash,
+    security_question: securityQuestion,
+    security_answer_hash: securityAnswerHash,
+  });
 
   return record;
 }
@@ -154,84 +373,102 @@ async function findUserById(id) {
   return result.rows[0] || null;
 }
 
-// upsert, not skip-if-exists - needs to handle a password/reset-token
-// update arriving from the other cloud too, not just brand new users
+// includes password_hash, unlike findUserById - only for internal use by
+// the change-password handler, which needs to verify the current password
+async function findUserByIdWithPassword(id) {
+  const db = getPool();
+  const result = await db.query('SELECT * FROM users WHERE id = $1', [id]);
+  return result.rows[0] || null;
+}
+
+// name-only update - password changes go through changePassword instead,
+// since that one needs the current-password check
+async function updateProfile(userId, { name }) {
+  const db = getPool();
+  const result = await db.query(
+    `UPDATE users SET name = $1 WHERE id = $2
+     RETURNING id, name, email, password_hash, security_question, security_answer_hash, created_at, origin_cloud`,
+    [name, userId]
+  );
+  const record = result.rows[0];
+  if (!record) return null;
+
+  await replicateToAzure('/replicate/users', record);
+  const { password_hash, security_answer_hash, ...safe } = record;
+  return safe;
+}
+
+// currentPasswordHash/newPasswordHash are handled by the caller (auth.js) -
+// db.js just does the lookup, comparison, and write
+async function changePassword(userId, newPasswordHash) {
+  const db = getPool();
+  const result = await db.query(
+    `UPDATE users SET password_hash = $1 WHERE id = $2
+     RETURNING id, name, email, password_hash, security_question, security_answer_hash, created_at, origin_cloud`,
+    [newPasswordHash, userId]
+  );
+  const record = result.rows[0];
+  if (!record) return null;
+
+  await replicateToAzure('/replicate/users', record);
+  return true;
+}
+
+// upsert - could be a new user or a profile/password/answer update
 async function replicateUser(record) {
   const db = getPool();
   await db.query(
-    `INSERT INTO users (id, name, email, password_hash, reset_token, reset_token_expires, origin_cloud)
+    `INSERT INTO users (id, name, email, password_hash, security_question, security_answer_hash, origin_cloud)
      VALUES ($1, $2, $3, $4, $5, $6, $7)
      ON CONFLICT (id) DO UPDATE SET
+       name = EXCLUDED.name,
        password_hash = EXCLUDED.password_hash,
-       reset_token = EXCLUDED.reset_token,
-       reset_token_expires = EXCLUDED.reset_token_expires`,
+       security_question = EXCLUDED.security_question,
+       security_answer_hash = EXCLUDED.security_answer_hash`,
     [
       record.id,
       record.name,
       record.email,
       record.password_hash,
-      record.reset_token || null,
-      record.reset_token_expires || null,
+      record.security_question,
+      record.security_answer_hash,
       record.origin_cloud || 'azure',
     ]
   );
 }
 
-async function requestPasswordReset(email) {
-  const db = getPool();
+// Returns null if no account exists for this email - the handler turns
+// that into an explicit "no account found" response (same deliberate
+// existence-disclosure decision as before, just without an email step
+// in between now). Never returns the answer itself, only the question.
+async function getSecurityQuestion(email) {
   const user = await findUserByEmail(email);
-  if (!user) return; // don't reveal whether the email exists
-
-  const token = crypto.randomBytes(24).toString('hex');
-  const expires = new Date(Date.now() + 60 * 60 * 1000);
-
-  await db.query('UPDATE users SET reset_token = $1, reset_token_expires = $2 WHERE id = $3', [
-    token,
-    expires,
-    user.id,
-  ]);
-
-  await replicateToAzure('/replicate/users', {
-    ...user,
-    reset_token: token,
-    reset_token_expires: expires,
-  });
-
-  await createNotification({
-    recipientEmail: email,
-    subject: 'Password reset requested',
-    body: `Use this code to reset your password: ${token}. It expires in 1 hour. If you didn't request this, you can ignore this message.`,
-    relatedBookingId: null,
-  });
+  if (!user) return null;
+  return user.security_question;
 }
 
-// newPasswordHash comes in pre-hashed from the handler
-async function resetPassword({ email, code, newPasswordHash }) {
+// answerMatches is computed by the caller (auth.js's verifyPassword,
+// reused here since bcrypt.compare works the same way regardless of
+// what's being compared) - db.js just does the lookup and the write
+async function resetPasswordWithAnswer({ email, newPasswordHash }) {
   const db = getPool();
   const user = await findUserByEmail(email);
-  if (!user || !user.reset_token || user.reset_token !== code) {
-    return false;
-  }
-  if (!user.reset_token_expires || new Date(user.reset_token_expires) < new Date()) {
-    return false;
-  }
+  if (!user) return false;
 
-  await db.query(
-    'UPDATE users SET password_hash = $1, reset_token = NULL, reset_token_expires = NULL WHERE id = $2',
-    [newPasswordHash, user.id]
-  );
+  await db.query('UPDATE users SET password_hash = $1 WHERE id = $2', [newPasswordHash, user.id]);
 
   await replicateToAzure('/replicate/users', {
     ...user,
     password_hash: newPasswordHash,
-    reset_token: null,
-    reset_token_expires: null,
   });
 
   return true;
 }
 
-// card ending in 0000 = declined, anything else = success (like Stripe test cards)
+// ---------------------------------------------------------------------
+// Payments (fake) and notifications (fake, not replicated) - unchanged
+// ---------------------------------------------------------------------
+
 async function createPayment({ bookingId, amount, currency, cardNumber }) {
   const id = crypto.randomUUID();
   const last4 = cardNumber.slice(-4);
@@ -312,18 +549,26 @@ async function listNotifications() {
 
 module.exports = {
   createEvent,
-  createBooking,
-  replicateEvent,
-  replicateBooking,
   listEvents,
+  listMyEvents,
+  cancelEvent,
+  replicateEvent,
+  createBooking,
+  listMyBookings,
+  cancelBooking,
+  replicateBooking,
   createUser,
   findUserByEmail,
   findUserById,
+  findUserByIdWithPassword,
+  updateProfile,
+  changePassword,
   replicateUser,
-  requestPasswordReset,
-  resetPassword,
+  getSecurityQuestion,
+  resetPasswordWithAnswer,
   createPayment,
   replicatePayment,
   createNotification,
   listNotifications,
+  ValidationError,
 };
