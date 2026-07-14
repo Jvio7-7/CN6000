@@ -4,7 +4,7 @@ import { AuthProvider } from '@/lib/auth-context';
 import Nav from '@/components/Nav';
 
 export const metadata = {
-  title: 'Gather — find and host events',
+  title: 'Gather - find and host events',
   description: 'Browse events, book your spot, and manage your bookings.',
 };
 

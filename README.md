@@ -1,4 +1,4 @@
-# Gather — event booking, multi-cloud
+# Gather - event booking, multi-cloud
 
 Event booking app for CN6000. Same app deployed on AWS and Azure at the
 same time (Active/Active), with data replicated between them and Route 53
@@ -16,7 +16,7 @@ Repo: github.com/Jvio7-7/CN6000
 
 ## Local dev
 
-The frontend has no backend of its own — it calls whichever cloud you
+The frontend has no backend of its own - it calls whichever cloud you
 point it at. So local dev just means running the Next.js dev server
 against an already-deployed backend:
 
@@ -77,20 +77,20 @@ sqlcmd -S <sql_server_fqdn> -d eventdb -U eventappadmin -P <password> -i sql\sch
 ```
 
 **Azure region note:** the student subscription only allows deployment to
-a handful of regions (found by trial and error — most regions come back
+a handful of regions (found by trial and error - most regions come back
 with a vague "disallowed by Azure" error). Currently using
 `southeastasia`, paired with AWS `ap-southeast-1` so the two clouds are
 geographically close for a fair latency comparison later.
 
 **Node version:** both clouds now run Node 22. Azure was stuck on Node
-20 for a while — the Terraform azurerm provider (v3.x) didn't support
+20 for a while - the Terraform azurerm provider (v3.x) didn't support
 declaring Node 22 for Function Apps, only the newer v4 provider did, and
 switching providers mid-project felt riskier than it was worth at the
 time. Revisited it once Azure started warning that Node 20 had reached
-end-of-life: checked the official v3→v4 upgrade guide against every
+end-of-life: checked the official v3 to v4 upgrade guide against every
 resource this project actually uses (storage account, Function App, SQL
 server/database/firewall rules), and none of the breaking changes in
-that guide touched anything used here — the only real changes needed
+that guide touched anything used here - the only real changes needed
 were the provider version itself, one deprecated provider-level setting,
 and the `node_version` value. Worth checking the actual upgrade guide
 against your specific resources before assuming a major version bump is
@@ -194,7 +194,7 @@ terraform apply
 
 This sets up a hosted zone, health checks on both `/health` endpoints,
 and weighted DNS (50/50) between AWS and Azure. No real domain was
-bought for this — the zone isn't publicly delegated, so it's tested by
+bought for this - the zone isn't publicly delegated, so it's tested by
 querying the assigned name servers directly:
 
 ```powershell
@@ -208,7 +208,7 @@ pushed to the other cloud right after the local write succeeds. UUIDs
 instead of auto-increment IDs because two clouds writing independently
 would eventually generate the same integer ID for different rows.
 
-Replication is awaited, not fire-and-forget — Lambda freezes its
+Replication is awaited, not fire-and-forget - Lambda freezes its
 execution environment as soon as the handler returns, so an unawaited
 background request just gets killed. Found this the hard way when
 replication silently did nothing for a while.
@@ -238,12 +238,13 @@ in between.
 
 ## Password reset (security question)
 
-Enter your email → the account's security question comes back (its
-existence is deliberately revealed if there's no matching account,
-rather than the usual non-committal "if an account exists..." message -
-a conscious trade of the usual anti-enumeration convention for a
-clearer user experience, worth knowing about if this were ever a real
-product) → answer it correctly → set a new password, all on one page.
+Enter your email and the account's security question comes back. Answer
+it correctly and you can set a new password, all on the same page. One
+thing to flag: if there's no account for that email, the page says so
+outright instead of the usual vague "if an account exists we've sent
+you a link". That makes it easy to check whether an email is
+registered, which a real product wouldn't want, but it keeps the flow
+much clearer to use and to demo.
 The answer is compared case-insensitively and trimmed, so "Blue" and
 "blue " both match what was set at signup - this isn't a
 high-security context, being forgiving matters more than exactness.
@@ -281,7 +282,7 @@ already exists.
 
 The plan was to use Azure AD, but the university tenant blocks students
 from registering applications, which Azure AD login needs. Built a
-custom JWT system instead — same secret on both clouds, so a login on
+custom JWT system instead - same secret on both clouds, so a login on
 AWS works when checking `/users/me` on Azure and vice versa.
 
 ## Payments
@@ -291,7 +292,7 @@ Fake. No real processor. Card ending in `0000` = declined, anything else
 
 ## Notifications
 
-Also fake — no email/SMS provider. Booking and payment both trigger a
+Also fake - no email/SMS provider. Booking and payment both trigger a
 notification row instead of an actual email. Not replicated across
 clouds (unlike everything else) since it's just a log of what happened
 locally, not something both sides need to agree on.
@@ -316,13 +317,13 @@ cd ..\..
 .\deploy-frontend-azure.ps1 -StorageAccountName <storage_account_name>
 ```
 
-No CDN on the Azure side — tried to set one up but Azure stopped
+No CDN on the Azure side - tried to set one up but Azure stopped
 allowing new classic CDN profiles, and the replacement (Front Door) costs
 ~$35/month, which isn't worth it since Azure's static website endpoint
 already does HTTPS on its own. S3 needed CloudFront because S3's website
 endpoint is HTTP only.
 
-Two separate URLs, not one unified domain — would need an actual
+Two separate URLs, not one unified domain - would need an actual
 purchased domain to make one address fail over between them, which
 wasn't worth it for this.
 
@@ -339,7 +340,7 @@ site and getting a 404 that the AWS-hosted site never showed.
 
 ## Security notes
 
-RDS is publicly accessible with the security group open on 5432 — avoids
+RDS is publicly accessible with the security group open on 5432 - avoids
 putting Lambda in a VPC (needs a NAT gateway, extra cost). Azure SQL's
 firewall allows Azure services generally plus whatever IP I'm currently
 on.

@@ -46,11 +46,11 @@ function BookForm() {
     setError('');
 
     if (!API_BASE_URL) {
-      setError('NEXT_PUBLIC_API_BASE_URL is not set — see .env.local');
+      setError('NEXT_PUBLIC_API_BASE_URL is not set - see .env.local');
       return;
     }
     if (!eventId) {
-      setError('No event selected — head back and pick one from the events page.');
+      setError('No event selected - head back and pick one from the events page.');
       return;
     }
     if (!token || !user) {
@@ -81,7 +81,7 @@ function BookForm() {
         router.push('/account');
       }
     } catch (err) {
-      setError('Network error — check your connection and try again.');
+      setError('Network error - check your connection and try again.');
     } finally {
       setLoading(false);
     }
@@ -131,7 +131,7 @@ function BookForm() {
         </div>
 
         <button className="btn btnPrimary btnFull" type="submit" disabled={loading || full} style={{ marginTop: 18 }}>
-          {loading ? 'Booking…' : full ? 'Event full' : 'Confirm booking'}
+          {loading ? 'Booking...' : full ? 'Event full' : 'Confirm booking'}
         </button>
       </form>
     </div>

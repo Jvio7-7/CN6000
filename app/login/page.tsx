@@ -17,7 +17,7 @@ export default function LoginPage() {
     setError('');
 
     if (!API_BASE_URL) {
-      setError('NEXT_PUBLIC_API_BASE_URL is not set — see .env.local');
+      setError('NEXT_PUBLIC_API_BASE_URL is not set - see .env.local');
       return;
     }
 
@@ -36,7 +36,7 @@ export default function LoginPage() {
       setSession(data.user, data.token);
       router.push('/');
     } catch (err) {
-      setError('Network error — check your connection and try again.');
+      setError('Network error - check your connection and try again.');
     } finally {
       setLoading(false);
     }
@@ -81,7 +81,7 @@ export default function LoginPage() {
         </p>
 
         <button className="btn btnPrimary btnFull" type="submit" disabled={loading}>
-          {loading ? 'Logging in…' : 'Log in'}
+          {loading ? 'Logging in...' : 'Log in'}
         </button>
 
         <p className="formFooter">

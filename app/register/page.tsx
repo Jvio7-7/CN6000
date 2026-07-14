@@ -25,7 +25,7 @@ export default function RegisterPage() {
     setError('');
 
     if (!API_BASE_URL) {
-      setError('NEXT_PUBLIC_API_BASE_URL is not set — see .env.local');
+      setError('NEXT_PUBLIC_API_BASE_URL is not set - see .env.local');
       return;
     }
     const passwordError = validatePasswordClient(form.password);
@@ -63,7 +63,7 @@ export default function RegisterPage() {
       setSession(data.user, data.token);
       router.push('/');
     } catch (err) {
-      setError('Network error — check your connection and try again.');
+      setError('Network error - check your connection and try again.');
     } finally {
       setLoading(false);
     }
@@ -139,7 +139,7 @@ export default function RegisterPage() {
             placeholder="What was your first pet's name?"
           />
           <span className="fieldHint">
-            Used to reset your password if you forget it — write one only you&apos;d know the answer to.
+            Used to reset your password if you forget it - write one only you&apos;d know the answer to.
           </span>
         </div>
 
@@ -155,7 +155,7 @@ export default function RegisterPage() {
         </div>
 
         <button className="btn btnPrimary btnFull" type="submit" disabled={loading}>
-          {loading ? 'Creating account…' : 'Sign up'}
+          {loading ? 'Creating account...' : 'Sign up'}
         </button>
 
         <p className="formFooter">

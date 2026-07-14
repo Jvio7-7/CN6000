@@ -45,11 +45,9 @@ async function replicateToAws(path, payload) {
   }
 }
 
-// ---------------------------------------------------------------------
 // Events - owned by the creating user (userId required), soft-deleted
 // via cancelled_at rather than a hard DELETE (bookings/payments reference
 // the event by foreign key).
-// ---------------------------------------------------------------------
 
 async function createEvent({ userId, title, date, location, capacity, price }) {
   if (new Date(date) <= new Date()) {
@@ -215,9 +213,7 @@ async function replicateEvent(record) {
     );
 }
 
-// ---------------------------------------------------------------------
 // Bookings - same ownership + soft-delete pattern
-// ---------------------------------------------------------------------
 
 async function createBooking({ userId, eventId, attendeeName, attendeeEmail }) {
   const pool = await getPool();
@@ -388,9 +384,7 @@ async function replicateBooking(record) {
     );
 }
 
-// ---------------------------------------------------------------------
 // Users - registration, profile edit, password change/reset
-// ---------------------------------------------------------------------
 
 // no email verification - account usable immediately, mirrors
 // lambda/layer/nodejs/db.js
@@ -555,9 +549,7 @@ async function resetPasswordWithAnswer({ email, newPasswordHash }) {
   return true;
 }
 
-// ---------------------------------------------------------------------
-// Payments (fake) and notifications (fake, not replicated) - unchanged
-// ---------------------------------------------------------------------
+// Payments (fake) and notifications (fake, not replicated)
 
 async function createPayment({ bookingId, amount, currency, cardNumber }) {
   const id = crypto.randomUUID();

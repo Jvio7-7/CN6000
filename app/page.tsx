@@ -23,7 +23,7 @@ export default function Home() {
 
   useEffect(() => {
     if (!API_BASE_URL) {
-      setError('NEXT_PUBLIC_API_BASE_URL is not set — see .env.local');
+      setError('NEXT_PUBLIC_API_BASE_URL is not set - see .env.local');
       setLoading(false);
       return;
     }
@@ -55,7 +55,7 @@ export default function Home() {
           place.
         </p>
         <Link href="/events/new" className="btn btnPrimary">
-          Host your own event →
+          Host your own event &rarr;
         </Link>
       </div>
 
@@ -65,7 +65,7 @@ export default function Home() {
 
       {error && <div className="alert alertError">{error}</div>}
 
-      {!error && loading && <div className="emptyState">Loading events…</div>}
+      {!error && loading && <div className="emptyState">Loading events...</div>}
 
       {!error && !loading && upcoming.length === 0 && (
         <div className="emptyState">

@@ -34,11 +34,11 @@ function PaymentForm() {
     setError('');
 
     if (!API_BASE_URL) {
-      setError('NEXT_PUBLIC_API_BASE_URL is not set — see .env.local');
+      setError('NEXT_PUBLIC_API_BASE_URL is not set - see .env.local');
       return;
     }
     if (!bookingId) {
-      setError('No booking found — head back and book a spot first.');
+      setError('No booking found - head back and book a spot first.');
       return;
     }
     if (!/^\d{2}\/\d{2}$/.test(expiry)) {
@@ -83,7 +83,7 @@ function PaymentForm() {
       setSuccess(true);
       setTimeout(() => router.push('/account'), 1600);
     } catch (err) {
-      setError('Network error — check your connection and try again.');
+      setError('Network error - check your connection and try again.');
     } finally {
       setLoading(false);
     }
@@ -94,7 +94,7 @@ function PaymentForm() {
       <form className="card" onSubmit={handleSubmit}>
         <h1 className="formTitle">Complete your booking</h1>
         <p className="formSub">
-          This is a demo checkout — no real card is ever charged.
+          This is a demo checkout - no real card is ever charged.
         </p>
 
         <div className="summaryBox">
@@ -105,7 +105,7 @@ function PaymentForm() {
         {error && <div className="alert alertError">{error}</div>}
         {success && (
           <div className="alert alertSuccess">
-            Payment received — taking you to your account…
+            Payment received - taking you to your account...
           </div>
         )}
 
@@ -119,7 +119,7 @@ function PaymentForm() {
             onChange={(e) => setCardNumber(formatCardNumber(e.target.value))}
             placeholder="4242 4242 4242 4242"
           />
-          <span className="fieldHint">Any number works — one ending in 0000 will be declined, for testing.</span>
+          <span className="fieldHint">Any number works - one ending in 0000 will be declined, for testing.</span>
         </div>
 
         <div className="paymentRow" style={{ gridTemplateColumns: '1fr 1fr' }}>
@@ -151,7 +151,7 @@ function PaymentForm() {
         </div>
 
         <button className="btn btnPrimary btnFull" type="submit" disabled={loading}>
-          {loading ? 'Processing…' : `Pay $${Number(amount).toFixed(2)}`}
+          {loading ? 'Processing...' : `Pay $${Number(amount).toFixed(2)}`}
         </button>
       </form>
     </div>

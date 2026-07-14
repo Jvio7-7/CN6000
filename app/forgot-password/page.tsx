@@ -23,7 +23,7 @@ export default function ForgotPasswordPage() {
     setError('');
 
     if (!API_BASE_URL) {
-      setError('NEXT_PUBLIC_API_BASE_URL is not set — see .env.local');
+      setError('NEXT_PUBLIC_API_BASE_URL is not set - see .env.local');
       return;
     }
 
@@ -43,7 +43,7 @@ export default function ForgotPasswordPage() {
       setQuestion(data.question);
       setStep('reset');
     } catch (err) {
-      setError('Network error — check your connection and try again.');
+      setError('Network error - check your connection and try again.');
     } finally {
       setLoading(false);
     }
@@ -78,7 +78,7 @@ export default function ForgotPasswordPage() {
       setSuccess(true);
       setTimeout(() => router.push('/login'), 1800);
     } catch (err) {
-      setError('Network error — check your connection and try again.');
+      setError('Network error - check your connection and try again.');
     } finally {
       setLoading(false);
     }
@@ -93,7 +93,7 @@ export default function ForgotPasswordPage() {
 
           {error && <div className="alert alertError">{error}</div>}
           {success && (
-            <div className="alert alertSuccess">Password updated. Redirecting you to log in…</div>
+            <div className="alert alertSuccess">Password updated. Redirecting you to log in...</div>
           )}
 
           <div className="summaryBox">
@@ -141,7 +141,7 @@ export default function ForgotPasswordPage() {
           </div>
 
           <button className="btn btnPrimary btnFull" type="submit" disabled={loading}>
-            {loading ? 'Updating…' : 'Update password'}
+            {loading ? 'Updating...' : 'Update password'}
           </button>
 
           <p className="formFooter">
@@ -175,7 +175,7 @@ export default function ForgotPasswordPage() {
         </div>
 
         <button className="btn btnPrimary btnFull" type="submit" disabled={loading}>
-          {loading ? 'Looking up…' : 'Continue'}
+          {loading ? 'Looking up...' : 'Continue'}
         </button>
 
         <p className="formFooter">

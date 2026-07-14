@@ -47,11 +47,9 @@ async function replicateToAzure(path, payload) {
   }
 }
 
-// ---------------------------------------------------------------------
 // Events - now owned by the user who created them (userId required),
 // with a soft-delete (cancelled_at) instead of a hard DELETE, since
 // bookings/payments reference the event by foreign key.
-// ---------------------------------------------------------------------
 
 async function createEvent({ userId, title, date, location, capacity, price }) {
   if (new Date(date) <= new Date()) {
@@ -188,9 +186,7 @@ async function replicateEvent(record) {
   );
 }
 
-// ---------------------------------------------------------------------
 // Bookings - same ownership + soft-delete pattern as events
-// ---------------------------------------------------------------------
 
 async function createBooking({ userId, eventId, attendeeName, attendeeEmail }) {
   const db = getPool();
@@ -330,9 +326,7 @@ async function replicateBooking(record) {
   );
 }
 
-// ---------------------------------------------------------------------
 // Users - registration, profile edit, password change/reset
-// ---------------------------------------------------------------------
 
 // no email verification anymore - see README for why (SES sandbox mode
 // needs a domain we don't have to ever get past). Account is usable
@@ -465,9 +459,7 @@ async function resetPasswordWithAnswer({ email, newPasswordHash }) {
   return true;
 }
 
-// ---------------------------------------------------------------------
-// Payments (fake) and notifications (fake, not replicated) - unchanged
-// ---------------------------------------------------------------------
+// Payments (fake) and notifications (fake, not replicated)
 
 async function createPayment({ bookingId, amount, currency, cardNumber }) {
   const id = crypto.randomUUID();

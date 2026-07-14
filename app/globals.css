@@ -366,7 +366,7 @@ a {
   border-radius: var(--radius);
 }
 
-/* ---------- ticket-stub event card (signature element) ---------- */
+/* ---------- event card (ticket stub look) ---------- */
 
 .ticketGrid {
   display: grid;

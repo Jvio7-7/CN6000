@@ -279,7 +279,7 @@ export default function AccountPage() {
                 )}
               </p>
               <p className="notificationBody">
-                {new Date(ev.event_date).toLocaleString()} · {ev.location} · {ev.capacity} spots
+                {new Date(ev.event_date).toLocaleString()} | {ev.location} | {ev.capacity} spots
               </p>
               {!ev.cancelled_at && (
                 <button

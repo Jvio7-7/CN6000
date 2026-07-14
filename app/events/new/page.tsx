@@ -70,7 +70,7 @@ export default function NewEventPage() {
     setError('');
 
     if (!API_BASE_URL) {
-      setError('NEXT_PUBLIC_API_BASE_URL is not set — see .env.local');
+      setError('NEXT_PUBLIC_API_BASE_URL is not set - see .env.local');
       return;
     }
     if (!token) {
@@ -102,7 +102,7 @@ export default function NewEventPage() {
       }
       router.push('/');
     } catch (err) {
-      setError('Network error — check your connection and try again.');
+      setError('Network error - check your connection and try again.');
     } finally {
       setLoading(false);
     }
@@ -201,12 +201,12 @@ export default function NewEventPage() {
             placeholder="Leave blank for a free event"
           />
           <span className="fieldHint">
-            Attendees pay this exact amount at checkout — they won&apos;t enter their own amount.
+            Attendees pay this exact amount at checkout - they won&apos;t enter their own amount.
           </span>
         </div>
 
         <button className="btn btnPrimary btnFull" type="submit" disabled={loading}>
-          {loading ? 'Publishing…' : 'Publish event'}
+          {loading ? 'Publishing...' : 'Publish event'}
         </button>
       </form>
     </div>
