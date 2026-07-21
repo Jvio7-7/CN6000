@@ -44,10 +44,22 @@ function validatePassword(password) {
   return null; // null = valid
 }
 
+// Shared-secret check for the internal replication endpoints. These are
+// published on the same public API Gateway as everything else, so without
+// this any caller could write straight into the database.
+function checkReplicationKey(event) {
+  const expected = process.env.REPLICATION_SECRET;
+  if (!expected) return false;
+  const headers = event && event.headers ? event.headers : {};
+  const supplied = headers['x-replication-key'] || headers['X-Replication-Key'];
+  return supplied === expected;
+}
+
 module.exports = {
   hashPassword,
   verifyPassword,
   signToken,
   verifyToken,
   validatePassword,
+  checkReplicationKey,
 };

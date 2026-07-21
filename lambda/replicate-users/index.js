@@ -1,6 +1,11 @@
 const { replicateUser } = require('/opt/nodejs/db');
+const { checkReplicationKey } = require('/opt/nodejs/auth');
 
 exports.handler = async (event) => {
+  if (!checkReplicationKey(event)) {
+    return { statusCode: 401, body: JSON.stringify({ error: 'Unauthorized' }) };
+  }
+
   try {
     const body = JSON.parse(event.body || '{}');
     await replicateUser(body);

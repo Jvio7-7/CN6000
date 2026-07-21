@@ -38,3 +38,9 @@ variable "jwt_secret" {
   type        = string
   sensitive   = true
 }
+
+variable "replication_secret" {
+  description = "Shared secret authenticating the internal /replicate/* endpoints - MUST match the value used in terraform/azure exactly"
+  type        = string
+  sensitive   = true
+}

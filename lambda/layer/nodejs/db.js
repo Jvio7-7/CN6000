@@ -25,6 +25,7 @@ function getPool() {
 }
 
 const AZURE_BASE_URL = process.env.AZURE_BASE_URL;
+const REPLICATION_SECRET = process.env.REPLICATION_SECRET;
 const REPLICATION_TIMEOUT_MS = 3000;
 
 async function replicateToAzure(path, payload) {
@@ -34,7 +35,10 @@ async function replicateToAzure(path, payload) {
     const timeout = setTimeout(() => controller.abort(), REPLICATION_TIMEOUT_MS);
     const res = await fetch(`${AZURE_BASE_URL}${path}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-replication-key': REPLICATION_SECRET,
+      },
       body: JSON.stringify(payload),
       signal: controller.signal,
     });
@@ -555,7 +559,10 @@ async function pushToPeer(path, payload) {
     const timeout = setTimeout(() => controller.abort(), 10000);
     const res = await fetch(`${AZURE_BASE_URL}${path}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-replication-key': REPLICATION_SECRET,
+      },
       body: JSON.stringify(payload),
       signal: controller.signal,
     });

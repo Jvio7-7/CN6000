@@ -41,10 +41,19 @@ function validatePassword(password) {
   return null;
 }
 
+// Shared-secret check for the internal replication endpoints. Azure Functions
+// v4 exposes headers as a Headers object, hence .get() rather than indexing.
+function checkReplicationKey(request) {
+  const expected = process.env.REPLICATION_SECRET;
+  if (!expected) return false;
+  return request.headers.get('x-replication-key') === expected;
+}
+
 module.exports = {
   hashPassword,
   verifyPassword,
   signToken,
   verifyToken,
   validatePassword,
+  checkReplicationKey,
 };

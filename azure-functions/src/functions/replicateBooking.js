@@ -1,5 +1,6 @@
 const { app } = require('@azure/functions');
 const { replicateBooking } = require('../db');
+const { checkReplicationKey } = require('../auth');
 
 app.http('replicateBooking', {
   methods: ['POST'],
@@ -7,6 +8,10 @@ app.http('replicateBooking', {
   route: 'replicate/bookings',
   handler: async (request, context) => {
     try {
+      if (!checkReplicationKey(request)) {
+        return { status: 401, jsonBody: { error: 'Unauthorized' } };
+      }
+
       const body = await request.json();
       await replicateBooking(body);
       return { status: 200, jsonBody: { status: 'replicated' } };

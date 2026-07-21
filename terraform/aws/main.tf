@@ -91,9 +91,10 @@ resource "aws_lambda_function" "create_event" {
 
   environment {
     variables = {
-      DATABASE_URL   = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
-      AZURE_BASE_URL = var.azure_base_url
-      JWT_SECRET     = var.jwt_secret
+      DATABASE_URL       = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
+      AZURE_BASE_URL     = var.azure_base_url
+      REPLICATION_SECRET = var.replication_secret
+      JWT_SECRET         = var.jwt_secret
     }
   }
 }
@@ -110,9 +111,10 @@ resource "aws_lambda_function" "book_event" {
 
   environment {
     variables = {
-      DATABASE_URL   = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
-      AZURE_BASE_URL = var.azure_base_url
-      JWT_SECRET     = var.jwt_secret
+      DATABASE_URL       = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
+      AZURE_BASE_URL     = var.azure_base_url
+      REPLICATION_SECRET = var.replication_secret
+      JWT_SECRET         = var.jwt_secret
     }
   }
 }
@@ -165,7 +167,8 @@ resource "aws_lambda_function" "replicate_events" {
 
   environment {
     variables = {
-      DATABASE_URL = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
+      DATABASE_URL       = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
+      REPLICATION_SECRET = var.replication_secret
     }
   }
 }
@@ -182,7 +185,8 @@ resource "aws_lambda_function" "replicate_bookings" {
 
   environment {
     variables = {
-      DATABASE_URL = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
+      DATABASE_URL       = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
+      REPLICATION_SECRET = var.replication_secret
     }
   }
 }
@@ -199,7 +203,8 @@ resource "aws_lambda_function" "replicate_users" {
 
   environment {
     variables = {
-      DATABASE_URL = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
+      DATABASE_URL       = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
+      REPLICATION_SECRET = var.replication_secret
     }
   }
 }
@@ -216,8 +221,9 @@ resource "aws_lambda_function" "reconcile" {
 
   environment {
     variables = {
-      DATABASE_URL   = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
-      AZURE_BASE_URL = var.azure_base_url
+      DATABASE_URL       = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
+      AZURE_BASE_URL     = var.azure_base_url
+      REPLICATION_SECRET = var.replication_secret
     }
   }
 }
@@ -236,9 +242,10 @@ resource "aws_lambda_function" "register" {
 
   environment {
     variables = {
-      DATABASE_URL   = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
-      AZURE_BASE_URL = var.azure_base_url
-      JWT_SECRET     = var.jwt_secret
+      DATABASE_URL       = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
+      AZURE_BASE_URL     = var.azure_base_url
+      REPLICATION_SECRET = var.replication_secret
+      JWT_SECRET         = var.jwt_secret
     }
   }
 }
@@ -308,8 +315,9 @@ resource "aws_lambda_function" "reset_password" {
 
   environment {
     variables = {
-      DATABASE_URL   = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
-      AZURE_BASE_URL = var.azure_base_url
+      DATABASE_URL       = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
+      AZURE_BASE_URL     = var.azure_base_url
+      REPLICATION_SECRET = var.replication_secret
     }
   }
 }
@@ -331,9 +339,10 @@ resource "aws_lambda_function" "update_profile" {
 
   environment {
     variables = {
-      DATABASE_URL   = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
-      AZURE_BASE_URL = var.azure_base_url
-      JWT_SECRET     = var.jwt_secret
+      DATABASE_URL       = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
+      AZURE_BASE_URL     = var.azure_base_url
+      REPLICATION_SECRET = var.replication_secret
+      JWT_SECRET         = var.jwt_secret
     }
   }
 }
@@ -350,9 +359,10 @@ resource "aws_lambda_function" "change_password" {
 
   environment {
     variables = {
-      DATABASE_URL   = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
-      AZURE_BASE_URL = var.azure_base_url
-      JWT_SECRET     = var.jwt_secret
+      DATABASE_URL       = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
+      AZURE_BASE_URL     = var.azure_base_url
+      REPLICATION_SECRET = var.replication_secret
+      JWT_SECRET         = var.jwt_secret
     }
   }
 }
@@ -369,9 +379,10 @@ resource "aws_lambda_function" "cancel_event" {
 
   environment {
     variables = {
-      DATABASE_URL   = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
-      AZURE_BASE_URL = var.azure_base_url
-      JWT_SECRET     = var.jwt_secret
+      DATABASE_URL       = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
+      AZURE_BASE_URL     = var.azure_base_url
+      REPLICATION_SECRET = var.replication_secret
+      JWT_SECRET         = var.jwt_secret
     }
   }
 }
@@ -388,9 +399,10 @@ resource "aws_lambda_function" "cancel_booking" {
 
   environment {
     variables = {
-      DATABASE_URL   = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
-      AZURE_BASE_URL = var.azure_base_url
-      JWT_SECRET     = var.jwt_secret
+      DATABASE_URL       = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
+      AZURE_BASE_URL     = var.azure_base_url
+      REPLICATION_SECRET = var.replication_secret
+      JWT_SECRET         = var.jwt_secret
     }
   }
 }
@@ -445,8 +457,9 @@ resource "aws_lambda_function" "payments" {
 
   environment {
     variables = {
-      DATABASE_URL   = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
-      AZURE_BASE_URL = var.azure_base_url
+      DATABASE_URL       = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
+      AZURE_BASE_URL     = var.azure_base_url
+      REPLICATION_SECRET = var.replication_secret
     }
   }
 }
@@ -463,7 +476,8 @@ resource "aws_lambda_function" "replicate_payments" {
 
   environment {
     variables = {
-      DATABASE_URL = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
+      DATABASE_URL       = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
+      REPLICATION_SECRET = var.replication_secret
     }
   }
 }

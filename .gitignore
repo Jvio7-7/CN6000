@@ -12,28 +12,7 @@ terraform.tfvars
 crash.log
 
 # Lambda build artifacts
-lambda/layer.zip
-lambda/events.zip
-lambda/list-events.zip
-lambda/replicate-users.zip
-lambda/register.zip
-lambda/login.zip
-lambda/me.zip
-lambda/forgot-password.zip
-lambda/reset-password.zip
-lambda/update-profile.zip
-lambda/change-password.zip
-lambda/cancel-event.zip
-lambda/cancel-booking.zip
-lambda/my-events.zip
-lambda/my-bookings.zip
-lambda/payments.zip
-lambda/replicate-payments.zip
-lambda/list-notifications.zip
-lambda/bookings.zip
-lambda/health.zip
-lambda/replicate-events.zip
-lambda/replicate-bookings.zip
+lambda/*.zip
 lambda/layer/nodejs/node_modules/
 
 # Azure Functions

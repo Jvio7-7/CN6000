@@ -1,7 +1,12 @@
 const { replicateEvent } = require('/opt/nodejs/db');
+const { checkReplicationKey } = require('/opt/nodejs/auth');
 
 // one hop only, doesn't replicate again (no ping-pong loop)
 exports.handler = async (event) => {
+  if (!checkReplicationKey(event)) {
+    return { statusCode: 401, body: JSON.stringify({ error: 'Unauthorized' }) };
+  }
+
   try {
     const body = JSON.parse(event.body || '{}');
     await replicateEvent(body);
