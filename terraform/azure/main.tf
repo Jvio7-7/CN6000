@@ -97,6 +97,12 @@ resource "azurerm_linux_function_app" "main" {
     AWS_BASE_URL              = var.aws_base_url
     JWT_SECRET               = var.jwt_secret
   }
+  lifecycle {
+    ignore_changes = [
+      app_settings["WEBSITE_RUN_FROM_PACKAGE"],
+      app_settings["WEBSITE_MOUNT_ENABLED"],
+    ]
+  }
 }
 
 # Basic tier, cheapest option
