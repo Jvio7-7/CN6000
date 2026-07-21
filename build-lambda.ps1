@@ -95,4 +95,8 @@ Write-Host "Zipping list-notifications function..."
 if (Test-Path lambda/list-notifications.zip) { Remove-Item lambda/list-notifications.zip }
 Compress-Archive -Path lambda/list-notifications/index.js -DestinationPath lambda/list-notifications.zip
 
+Write-Host "Zipping reconcile function..."
+if (Test-Path lambda/reconcile.zip) { Remove-Item lambda/reconcile.zip }
+Compress-Archive -Path lambda/reconcile/index.js -DestinationPath lambda/reconcile.zip
+
 Write-Host "Done. All lambda zip files are ready for Terraform."

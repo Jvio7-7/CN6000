@@ -539,6 +539,54 @@ async function listNotifications() {
   return result.rows;
 }
 
+// resync after a cloud has been down. the normal replicate is best-effort
+// so writes made while the peer was down never got there. this just reads
+// everything and sends it again. the /replicate/* endpoints upsert so
+// re-sending rows that already exist doesn't matter, only the missing ones
+// get added. run it on both clouds after one comes back.
+
+// separate push with a 10s timeout (the normal one aborts at 3s) so a
+// re-sync of many rows doesn't get cut off. returns true/false so we can
+// count how many actually went through.
+async function pushToPeer(path, payload) {
+  if (!AZURE_BASE_URL) return false;
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
+    const res = await fetch(`${AZURE_BASE_URL}${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+    return res.ok;
+  } catch (err) {
+    return false;
+  }
+}
+
+async function reconcileToPeer() {
+  const db = getPool();
+  const result = { users: 0, events: 0, bookings: 0, payments: 0, failed: 0 };
+
+  const tables = [
+    { key: 'users',    sql: 'SELECT * FROM users',    path: '/replicate/users' },
+    { key: 'events',   sql: 'SELECT * FROM events',   path: '/replicate/events' },
+    { key: 'bookings', sql: 'SELECT * FROM bookings', path: '/replicate/bookings' },
+    { key: 'payments', sql: 'SELECT * FROM payments', path: '/replicate/payments' },
+  ];
+
+  for (const t of tables) {
+    const rows = (await db.query(t.sql)).rows;
+    for (const row of rows) {
+      const ok = await pushToPeer(t.path, row);
+      if (ok) { result[t.key]++; } else { result.failed++; }
+    }
+  }
+  return result;
+}
+
 module.exports = {
   createEvent,
   listEvents,
@@ -562,5 +610,6 @@ module.exports = {
   replicatePayment,
   createNotification,
   listNotifications,
+  reconcileToPeer,
   ValidationError,
 };

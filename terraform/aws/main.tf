@@ -202,6 +202,24 @@ resource "aws_lambda_function" "replicate_users" {
   }
 }
 
+resource "aws_lambda_function" "reconcile" {
+  function_name    = "${var.project_name}-reconcile"
+  filename         = "${path.module}/../../lambda/reconcile.zip"
+  source_code_hash = filebase64sha256("${path.module}/../../lambda/reconcile.zip")
+  handler          = "index.handler"
+  runtime          = "nodejs22.x"
+  role             = aws_iam_role.lambda_exec.arn
+  layers           = [aws_lambda_layer_version.db_layer.arn]
+  timeout          = 60
+
+  environment {
+    variables = {
+      DATABASE_URL   = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
+      AZURE_BASE_URL = var.azure_base_url
+    }
+  }
+}
+
 # jwt_secret has to match terraform/azure exactly
 
 resource "aws_lambda_function" "register" {
@@ -535,6 +553,13 @@ resource "aws_apigatewayv2_integration" "replicate_users" {
   payload_format_version = "2.0"
 }
 
+resource "aws_apigatewayv2_integration" "reconcile" {
+  api_id                 = aws_apigatewayv2_api.http_api.id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = aws_lambda_function.reconcile.invoke_arn
+  payload_format_version = "2.0"
+}
+
 resource "aws_apigatewayv2_integration" "register" {
   api_id                 = aws_apigatewayv2_api.http_api.id
   integration_type       = "AWS_PROXY"
@@ -675,6 +700,12 @@ resource "aws_apigatewayv2_route" "replicate_users" {
   target    = "integrations/${aws_apigatewayv2_integration.replicate_users.id}"
 }
 
+resource "aws_apigatewayv2_route" "reconcile" {
+  api_id    = aws_apigatewayv2_api.http_api.id
+  route_key = "POST /replicate/reconcile"
+  target    = "integrations/${aws_apigatewayv2_integration.reconcile.id}"
+}
+
 resource "aws_apigatewayv2_route" "register" {
   api_id    = aws_apigatewayv2_api.http_api.id
   route_key = "POST /users/register"
@@ -811,6 +842,14 @@ resource "aws_lambda_permission" "replicate_users_apigw" {
   statement_id  = "AllowAPIGatewayInvokeReplicateUsers"
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.replicate_users.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.http_api.execution_arn}/*/*"
+}
+
+resource "aws_lambda_permission" "reconcile_apigw" {
+  statement_id  = "AllowAPIGatewayInvokeReconcile"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.reconcile.function_name
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${aws_apigatewayv2_api.http_api.execution_arn}/*/*"
 }

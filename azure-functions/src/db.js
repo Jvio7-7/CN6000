@@ -650,6 +650,48 @@ async function listNotifications() {
   return result.recordset;
 }
 
+// resync after a cloud has been down - same as the AWS side in
+// lambda/layer/nodejs/db.js. reads everything and re-sends it; the
+// /replicate/* endpoints upsert so only the missed rows get added.
+async function pushToPeer(path, payload) {
+  if (!AWS_BASE_URL) return false;
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
+    const res = await fetch(`${AWS_BASE_URL}${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+    return res.ok;
+  } catch (err) {
+    return false;
+  }
+}
+
+async function reconcileToPeer() {
+  const pool = await getPool();
+  const result = { users: 0, events: 0, bookings: 0, payments: 0, failed: 0 };
+
+  const tables = [
+    { key: 'users',    sql: 'SELECT * FROM users',    path: '/replicate/users' },
+    { key: 'events',   sql: 'SELECT * FROM events',   path: '/replicate/events' },
+    { key: 'bookings', sql: 'SELECT * FROM bookings', path: '/replicate/bookings' },
+    { key: 'payments', sql: 'SELECT * FROM payments', path: '/replicate/payments' },
+  ];
+
+  for (const t of tables) {
+    const rows = (await pool.request().query(t.sql)).recordset;
+    for (const row of rows) {
+      const ok = await pushToPeer(t.path, row);
+      if (ok) { result[t.key]++; } else { result.failed++; }
+    }
+  }
+  return result;
+}
+
 module.exports = {
   createEvent,
   listEvents,
@@ -673,5 +715,6 @@ module.exports = {
   replicatePayment,
   createNotification,
   listNotifications,
+  reconcileToPeer,
   ValidationError,
 };
