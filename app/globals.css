@@ -284,6 +284,39 @@ a {
   border-color: var(--ink);
 }
 
+.btnDanger {
+  background: #b91c1c;
+  color: #fff;
+  border: 1px solid #b91c1c;
+}
+
+.btnDanger:hover {
+  background: #991b1b;
+  border-color: #991b1b;
+}
+
+.deleteAccountArea {
+  display: flex;
+  justify-content: center;
+  margin-top: 40px;
+}
+
+.deleteConfirm {
+  max-width: 420px;
+  text-align: center;
+}
+
+.deleteConfirmText {
+  margin-top: 0;
+  margin-bottom: 16px;
+}
+
+.deleteConfirmButtons {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+}
+
 .btnFull {
   width: 100%;
 }

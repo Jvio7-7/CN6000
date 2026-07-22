@@ -36,7 +36,7 @@ interface MyBookingRecord {
 
 export default function AccountPage() {
   const router = useRouter();
-  const { user, token, loading, updateUser } = useAuth();
+  const { user, token, loading, updateUser, logout } = useAuth();
 
   const [notifications, setNotifications] = useState<NotificationRecord[]>([]);
   const [myEvents, setMyEvents] = useState<MyEventRecord[]>([]);
@@ -170,6 +170,29 @@ export default function AccountPage() {
       refreshMyEvents();
     } catch (err) {
       // silent - the row just won't update, user can retry
+    }
+  }
+
+  const [deleting, setDeleting] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+
+  async function handleDeleteAccount() {
+    setDeleting(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/users/me`, {
+        method: 'DELETE',
+        headers: authHeaders(),
+      });
+      if (!res.ok) {
+        alert('Could not delete the account. Please try again.');
+        setDeleting(false);
+        return;
+      }
+      logout();
+      router.push('/');
+    } catch {
+      alert('Could not delete the account. Please try again.');
+      setDeleting(false);
     }
   }
 
@@ -346,6 +369,44 @@ export default function AccountPage() {
           ))}
         </div>
       )}
+
+      <div className="deleteAccountArea">
+        {!confirmingDelete ? (
+          <button
+            className="btn btnDanger"
+            type="button"
+            onClick={() => setConfirmingDelete(true)}
+          >
+            Delete Account
+          </button>
+        ) : (
+          <div className="card deleteConfirm">
+            <p className="deleteConfirmText">
+              Are you sure you want to delete your account? This will cancel your
+              events and bookings and permanently remove your account. This cannot
+              be undone.
+            </p>
+            <div className="deleteConfirmButtons">
+              <button
+                className="btn btnSecondary"
+                type="button"
+                onClick={() => setConfirmingDelete(false)}
+                disabled={deleting}
+              >
+                Cancel
+              </button>
+              <button
+                className="btn btnDanger"
+                type="button"
+                onClick={handleDeleteAccount}
+                disabled={deleting}
+              >
+                {deleting ? 'Deleting\u2026' : 'Delete Account'}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

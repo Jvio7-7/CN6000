@@ -425,7 +425,7 @@ async function findUserByEmail(email) {
   const result = await pool
     .request()
     .input('email', sql.NVarChar, email)
-    .query('SELECT * FROM users WHERE email = @email');
+    .query('SELECT * FROM users WHERE email = @email AND deleted_at IS NULL');
   return result.recordset[0] || null;
 }
 
@@ -434,7 +434,7 @@ async function findUserById(id) {
   const result = await pool
     .request()
     .input('id', sql.UniqueIdentifier, id)
-    .query('SELECT id, name, email, created_at, origin_cloud FROM users WHERE id = @id');
+    .query('SELECT id, name, email, created_at, origin_cloud FROM users WHERE id = @id AND deleted_at IS NULL');
   return result.recordset[0] || null;
 }
 
@@ -445,7 +445,7 @@ async function findUserByIdWithPassword(id) {
   const result = await pool
     .request()
     .input('id', sql.UniqueIdentifier, id)
-    .query('SELECT * FROM users WHERE id = @id');
+    .query('SELECT * FROM users WHERE id = @id AND deleted_at IS NULL');
   return result.recordset[0] || null;
 }
 
@@ -466,6 +466,71 @@ async function updateProfile(userId, { name }) {
   await replicateToAws('/replicate/users', record);
   const { password_hash, security_answer_hash, ...safe } = record;
   return safe;
+}
+
+// GDPR-style account deletion (tombstone + anonymisation). See the AWS
+// db.js copy for the full reasoning: a plain hard DELETE is unsafe here
+// because reconcile would resurrect the row from the peer. Instead PII is
+// overwritten, deleted_at is set as the tombstone, and the id is kept so
+// events/bookings foreign keys stay intact. The user's hosted events are
+// cancelled (refunding attendees via cancelEvent) and their own bookings too.
+async function deleteAccount(userId) {
+  const pool = await getPool();
+
+  const owned = await pool
+    .request()
+    .input('uid', sql.UniqueIdentifier, userId)
+    .query('SELECT id FROM events WHERE user_id = @uid AND cancelled_at IS NULL');
+  for (const row of owned.recordset) {
+    await cancelEvent(row.id, userId);
+  }
+
+  const myBookings = await pool
+    .request()
+    .input('uid', sql.UniqueIdentifier, userId)
+    .query(
+      `UPDATE bookings SET cancelled_at = GETDATE()
+       OUTPUT INSERTED.id, INSERTED.user_id, INSERTED.event_id, INSERTED.attendee_name, INSERTED.attendee_email, INSERTED.cancelled_at, INSERTED.created_at, INSERTED.origin_cloud
+       WHERE user_id = @uid AND cancelled_at IS NULL`
+    );
+  for (const b of myBookings.recordset) {
+    await replicateToAws('/replicate/bookings', b);
+  }
+
+  // read the real email before anonymising, so the activity log (notifications,
+  // keyed by email rather than id) can be cleared for this person too.
+  const before = await pool
+    .request()
+    .input('id', sql.UniqueIdentifier, userId)
+    .query('SELECT email FROM users WHERE id = @id');
+  const oldEmail = before.recordset[0] ? before.recordset[0].email : null;
+
+  const anonEmail = `deleted+${userId}@deleted.invalid`;
+  const result = await pool
+    .request()
+    .input('id', sql.UniqueIdentifier, userId)
+    .input('email', sql.NVarChar, anonEmail)
+    .query(
+      `UPDATE users
+         SET name = 'Deleted user', email = @email, password_hash = '',
+             security_question = '', security_answer_hash = '', deleted_at = GETDATE()
+       OUTPUT INSERTED.id, INSERTED.name, INSERTED.email, INSERTED.password_hash, INSERTED.security_question, INSERTED.security_answer_hash, INSERTED.deleted_at, INSERTED.origin_cloud
+       WHERE id = @id AND deleted_at IS NULL`
+    );
+  const record = result.recordset[0];
+  if (!record) return false;
+
+  // remove this person's activity log so a later signup with the same email
+  // does not inherit the deleted user's history
+  if (oldEmail) {
+    await pool
+      .request()
+      .input('oldEmail', sql.NVarChar, oldEmail)
+      .query('DELETE FROM notifications WHERE recipient_email = @oldEmail');
+  }
+
+  await replicateToAws('/replicate/users', record);
+  return true;
 }
 
 async function changePassword(userId, newPasswordHash) {
@@ -502,10 +567,13 @@ async function replicateUser(record) {
       .input('passwordHash', sql.NVarChar, record.password_hash)
       .input('securityQuestion', sql.NVarChar, record.security_question)
       .input('securityAnswerHash', sql.NVarChar, record.security_answer_hash)
+      .input('email', sql.NVarChar, record.email)
+      .input('deletedAt', sql.DateTime, record.deleted_at || null)
       .query(
         `UPDATE users
-         SET name = @name, password_hash = @passwordHash,
-             security_question = @securityQuestion, security_answer_hash = @securityAnswerHash
+         SET name = @name, email = @email, password_hash = @passwordHash,
+             security_question = @securityQuestion, security_answer_hash = @securityAnswerHash,
+             deleted_at = @deletedAt
          WHERE id = @id`
       );
     return;
@@ -520,9 +588,10 @@ async function replicateUser(record) {
     .input('securityQuestion', sql.NVarChar, record.security_question)
     .input('securityAnswerHash', sql.NVarChar, record.security_answer_hash)
     .input('originCloud', sql.NVarChar, record.origin_cloud || 'aws')
+    .input('deletedAt', sql.DateTime, record.deleted_at || null)
     .query(
-      `INSERT INTO users (id, name, email, password_hash, security_question, security_answer_hash, origin_cloud)
-       VALUES (@id, @name, @email, @passwordHash, @securityQuestion, @securityAnswerHash, @originCloud)`
+      `INSERT INTO users (id, name, email, password_hash, security_question, security_answer_hash, deleted_at, origin_cloud)
+       VALUES (@id, @name, @email, @passwordHash, @securityQuestion, @securityAnswerHash, @deletedAt, @originCloud)`
     );
 }
 
@@ -716,6 +785,7 @@ module.exports = {
   updateProfile,
   changePassword,
   replicateUser,
+  deleteAccount,
   getSecurityQuestion,
   resetPasswordWithAnswer,
   createPayment,

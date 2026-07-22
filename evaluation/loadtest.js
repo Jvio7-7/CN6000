@@ -6,6 +6,7 @@
 
 import http from 'k6/http';
 import { check, sleep } from 'k6';
+import { textSummary } from 'https://jslib.k6.io/k6-summary/0.0.1/index.js';
 
 const BASE = __ENV.BASE;
 const RUN  = __ENV.RUN || `${Date.now()}`;
@@ -61,4 +62,16 @@ export function writeScenario() {
   });
   check(res, { 'register 201': (r) => r.status === 201 });
   sleep(1);
+}
+
+// Save a full result summary to a tagged file on every run, so results are
+// preserved as raw data rather than only a screenshot. The file name carries
+// the run tag, so VPC-before and VPC-after runs never overwrite each other.
+// k6 also prints the usual summary to the terminal.
+export function handleSummary(data) {
+  const stamp = RUN;
+  const out = {};
+  out[`loadtest-summary-${stamp}.json`] = JSON.stringify(data, null, 2);
+  out['stdout'] = textSummary(data, { indent: ' ', enableColors: true });
+  return out;
 }

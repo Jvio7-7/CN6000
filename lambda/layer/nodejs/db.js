@@ -358,14 +358,14 @@ async function createUser({ name, email, passwordHash, securityQuestion, securit
 
 async function findUserByEmail(email) {
   const db = getPool();
-  const result = await db.query('SELECT * FROM users WHERE email = $1', [email]);
+  const result = await db.query('SELECT * FROM users WHERE email = $1 AND deleted_at IS NULL', [email]);
   return result.rows[0] || null;
 }
 
 async function findUserById(id) {
   const db = getPool();
   const result = await db.query(
-    'SELECT id, name, email, created_at, origin_cloud FROM users WHERE id = $1',
+    'SELECT id, name, email, created_at, origin_cloud FROM users WHERE id = $1 AND deleted_at IS NULL',
     [id]
   );
   return result.rows[0] || null;
@@ -375,7 +375,7 @@ async function findUserById(id) {
 // the change-password handler, which needs to verify the current password
 async function findUserByIdWithPassword(id) {
   const db = getPool();
-  const result = await db.query('SELECT * FROM users WHERE id = $1', [id]);
+  const result = await db.query('SELECT * FROM users WHERE id = $1 AND deleted_at IS NULL', [id]);
   return result.rows[0] || null;
 }
 
@@ -394,6 +394,73 @@ async function updateProfile(userId, { name }) {
   await replicateToAzure('/replicate/users', record);
   const { password_hash, security_answer_hash, ...safe } = record;
   return safe;
+}
+
+// GDPR-style account deletion. In a multi-cloud active-active system a plain
+// hard DELETE is unsafe: reconcile re-pushes local rows to the peer, so a row
+// deleted on one cloud but still present on the other would be resurrected on
+// the next recovery. Instead this is a tombstone with anonymisation:
+//   - personally identifiable fields are actually overwritten (right to erasure)
+//   - deleted_at is set as the tombstone, so reconcile converges on the deleted
+//     state rather than restoring the account
+//   - the id is kept so events/bookings foreign keys stay intact
+// The user's own events are cancelled (which refunds their attendees via the
+// existing cancelEvent path) and the user's own bookings are cancelled too.
+async function deleteAccount(userId) {
+  const db = getPool();
+
+  // cancel every event this user hosts - reuses cancelEvent so attendees are
+  // refunded and each cancellation replicates on its own
+  const owned = await db.query(
+    'SELECT id FROM events WHERE user_id = $1 AND cancelled_at IS NULL',
+    [userId]
+  );
+  for (const row of owned.rows) {
+    await cancelEvent(row.id, userId);
+  }
+
+  // cancel this user's own bookings on other hosts' events
+  const myBookings = await db.query(
+    `UPDATE bookings SET cancelled_at = NOW()
+     WHERE user_id = $1 AND cancelled_at IS NULL
+     RETURNING id, user_id, event_id, attendee_name, attendee_email, cancelled_at, created_at, origin_cloud`,
+    [userId]
+  );
+  for (const b of myBookings.rows) {
+    await replicateToAzure('/replicate/bookings', b);
+  }
+
+  // read the real email before anonymising, so the activity log (notifications,
+  // keyed by email rather than id) can be cleared for this person too.
+  const before = await db.query('SELECT email FROM users WHERE id = $1', [userId]);
+  const oldEmail = before.rows[0] ? before.rows[0].email : null;
+
+  // anonymise PII and tombstone the account. email is set to a unique
+  // placeholder so the UNIQUE constraint holds and the address is freed.
+  const anonEmail = `deleted+${userId}@deleted.invalid`;
+  const result = await db.query(
+    `UPDATE users
+       SET name = 'Deleted user',
+           email = $2,
+           password_hash = '',
+           security_question = '',
+           security_answer_hash = '',
+           deleted_at = NOW()
+     WHERE id = $1 AND deleted_at IS NULL
+     RETURNING id, name, email, password_hash, security_question, security_answer_hash, deleted_at, origin_cloud`,
+    [userId, anonEmail]
+  );
+  const record = result.rows[0];
+  if (!record) return false;
+
+  // remove this person's activity log so a later signup with the same email
+  // does not inherit the deleted user's history
+  if (oldEmail) {
+    await db.query('DELETE FROM notifications WHERE recipient_email = $1', [oldEmail]);
+  }
+
+  await replicateToAzure('/replicate/users', record);
+  return true;
 }
 
 // currentPasswordHash/newPasswordHash are handled by the caller (auth.js) -
@@ -416,13 +483,15 @@ async function changePassword(userId, newPasswordHash) {
 async function replicateUser(record) {
   const db = getPool();
   await db.query(
-    `INSERT INTO users (id, name, email, password_hash, security_question, security_answer_hash, origin_cloud)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)
+    `INSERT INTO users (id, name, email, password_hash, security_question, security_answer_hash, deleted_at, origin_cloud)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
      ON CONFLICT (id) DO UPDATE SET
        name = EXCLUDED.name,
+       email = EXCLUDED.email,
        password_hash = EXCLUDED.password_hash,
        security_question = EXCLUDED.security_question,
-       security_answer_hash = EXCLUDED.security_answer_hash`,
+       security_answer_hash = EXCLUDED.security_answer_hash,
+       deleted_at = EXCLUDED.deleted_at`,
     [
       record.id,
       record.name,
@@ -430,6 +499,7 @@ async function replicateUser(record) {
       record.password_hash,
       record.security_question,
       record.security_answer_hash,
+      record.deleted_at || null,
       record.origin_cloud || 'azure',
     ]
   );
@@ -611,6 +681,7 @@ module.exports = {
   updateProfile,
   changePassword,
   replicateUser,
+  deleteAccount,
   getSecurityQuestion,
   resetPasswordWithAnswer,
   createPayment,

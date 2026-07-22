@@ -36,6 +36,7 @@ CREATE TABLE users (
   security_question NVARCHAR(255) NOT NULL,
   security_answer_hash NVARCHAR(255) NOT NULL,
   created_at DATETIME NOT NULL DEFAULT GETDATE(),
+  deleted_at DATETIME,
   origin_cloud NVARCHAR(10) NOT NULL DEFAULT 'azure'
 );
 

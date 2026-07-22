@@ -63,6 +63,10 @@ Write-Host "Zipping update-profile function..."
 if (Test-Path lambda/update-profile.zip) { Remove-Item lambda/update-profile.zip }
 Compress-Archive -Path lambda/update-profile/index.js -DestinationPath lambda/update-profile.zip
 
+Write-Host "Zipping delete-account function..."
+if (Test-Path lambda/delete-account.zip) { Remove-Item lambda/delete-account.zip }
+Compress-Archive -Path lambda/delete-account/index.js -DestinationPath lambda/delete-account.zip
+
 Write-Host "Zipping change-password function..."
 if (Test-Path lambda/change-password.zip) { Remove-Item lambda/change-password.zip }
 Compress-Archive -Path lambda/change-password/index.js -DestinationPath lambda/change-password.zip

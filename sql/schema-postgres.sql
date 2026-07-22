@@ -16,6 +16,7 @@ CREATE TABLE users (
   security_question VARCHAR(255) NOT NULL,
   security_answer_hash VARCHAR(255) NOT NULL,
   created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  deleted_at TIMESTAMP,
   origin_cloud VARCHAR(10) NOT NULL DEFAULT 'aws'
 );
 

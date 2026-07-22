@@ -33,8 +33,8 @@ resource "aws_db_instance" "postgres" {
   vpc_security_group_ids = [aws_security_group.rds_private_sg.id]
   db_subnet_group_name   = aws_db_subnet_group.main.name
   skip_final_snapshot    = true
-  storage_encrypted      = true
-  snapshot_identifier    = "event-app-db-enc"
+  storage_encrypted   = true
+  snapshot_identifier = "event-app-db-enc"
 }
 
 # run build-lambda.ps1 before applying
@@ -411,6 +411,31 @@ resource "aws_lambda_function" "update_profile" {
   }
 }
 
+resource "aws_lambda_function" "delete_account" {
+  function_name    = "${var.project_name}-delete-account"
+  filename         = "${path.module}/../../lambda/delete-account.zip"
+  source_code_hash = filebase64sha256("${path.module}/../../lambda/delete-account.zip")
+  handler          = "index.handler"
+  runtime          = "nodejs22.x"
+  role             = aws_iam_role.lambda_exec.arn
+  layers           = [aws_lambda_layer_version.db_layer.arn]
+  timeout          = 10
+
+  vpc_config {
+    subnet_ids         = local.lambda_vpc_subnets
+    security_group_ids = local.lambda_vpc_sg
+  }
+
+  environment {
+    variables = {
+      DATABASE_URL       = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
+      AZURE_BASE_URL     = var.azure_base_url
+      REPLICATION_SECRET = var.replication_secret
+      JWT_SECRET         = var.jwt_secret
+    }
+  }
+}
+
 resource "aws_lambda_function" "change_password" {
   function_name    = "${var.project_name}-change-password"
   filename         = "${path.module}/../../lambda/change-password.zip"
@@ -613,7 +638,7 @@ resource "aws_apigatewayv2_api" "http_api" {
 
   cors_configuration {
     allow_origins = ["*"]
-    allow_methods = ["GET", "POST", "PATCH", "OPTIONS"]
+    allow_methods = ["GET", "POST", "PATCH", "DELETE", "OPTIONS"]
     allow_headers = ["content-type", "authorization"]
   }
 }
@@ -719,6 +744,13 @@ resource "aws_apigatewayv2_integration" "update_profile" {
   api_id                 = aws_apigatewayv2_api.http_api.id
   integration_type       = "AWS_PROXY"
   integration_uri        = aws_lambda_function.update_profile.invoke_arn
+  payload_format_version = "2.0"
+}
+
+resource "aws_apigatewayv2_integration" "delete_account" {
+  api_id                 = aws_apigatewayv2_api.http_api.id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = aws_lambda_function.delete_account.invoke_arn
   payload_format_version = "2.0"
 }
 
@@ -860,6 +892,12 @@ resource "aws_apigatewayv2_route" "update_profile" {
   api_id    = aws_apigatewayv2_api.http_api.id
   route_key = "PATCH /users/me"
   target    = "integrations/${aws_apigatewayv2_integration.update_profile.id}"
+}
+
+resource "aws_apigatewayv2_route" "delete_account" {
+  api_id    = aws_apigatewayv2_api.http_api.id
+  route_key = "DELETE /users/me"
+  target    = "integrations/${aws_apigatewayv2_integration.delete_account.id}"
 }
 
 resource "aws_apigatewayv2_route" "change_password" {
@@ -1042,6 +1080,14 @@ resource "aws_lambda_permission" "update_profile_apigw" {
   statement_id  = "AllowAPIGatewayInvokeUpdateProfile"
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.update_profile.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.http_api.execution_arn}/*/*"
+}
+
+resource "aws_lambda_permission" "delete_account_apigw" {
+  statement_id  = "AllowAPIGatewayInvokeDeleteAccount"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.delete_account.function_name
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${aws_apigatewayv2_api.http_api.execution_arn}/*/*"
 }

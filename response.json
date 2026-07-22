@@ -1,0 +1,1 @@
+{"statusCode":500,"body":"{\"error\":\"error: no pg_hba.conf entry for host \\\"10.20.11.213\\\", user \\\"eventappadmin\\\", database \\\"eventdb\\\", no encryption\"}"}
