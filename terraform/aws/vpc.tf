@@ -1,15 +1,12 @@
 # ---------------------------------------------------------------------------
 # Network isolation for RDS.
 #
-# Originally RDS was publicly accessible so that Lambdas running outside any
-# VPC could reach it without a NAT gateway. That left the database open to the
-# internet on 5432, guarded only by the master password. This file moves the
-# database into private subnets and the Lambdas into the same VPC, so the
-# database is reachable only from the application's own compute.
+# The database runs in private subnets and is not publicly accessible; it is
+# reachable only from the application's own Lambda functions, which run inside
+# the same VPC. The database is never exposed to the internet on 5432.
 #
-# Because VPC-attached Lambdas lose default internet access, a NAT gateway is
-# required for them to keep reaching the Azure peer for cross-cloud
-# replication. That NAT gateway is the main running cost of this change.
+# Because VPC-attached Lambdas have no default internet access, a NAT gateway
+# provides their outbound path to the Azure peer for cross-cloud replication.
 # ---------------------------------------------------------------------------
 
 data "aws_availability_zones" "available" {

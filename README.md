@@ -260,22 +260,20 @@ and password change alike, so there's no path that skips it.
 
 ## Accounts: profile edit, password change, and ownership
 
-Logged-in users can now change their name and password from the account
+Logged-in users can change their name and password from the account
 page (password change requires the current password, unlike the
-code-based reset flow above). Hosting an event or booking a slot now
-requires being logged in - both used to work as a guest, but there's no
-way to show "your events" or "your bookings" without knowing whose they
-are.
+code-based reset flow above). Hosting an event or booking a slot
+requires being logged in, since "your events" and "your bookings" are
+tied to the authenticated user.
 
 Cancelling an event or booking is a soft delete (a `cancelled_at`
 timestamp), not a real DELETE - a hard delete would violate the foreign
 keys bookings/payments already have against events. Cancelled events
 drop off the public listing but the row (and its history) stays.
 
-This also meant upgrading event/booking replication from "insert once,
-ignore duplicates" to a proper upsert (same pattern already used for
-user records) - a cancellation on one cloud needs to *update* the
-existing row on the other cloud, not be silently skipped because the id
+Event/booking replication uses an upsert (the same pattern used for
+user records): a cancellation on one cloud *updates* the existing row on
+the other cloud, rather than being silently skipped because the id
 already exists.
 
 ## Why not Azure AD
