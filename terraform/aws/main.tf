@@ -11,26 +11,12 @@ provider "aws" {
   region = var.aws_region
 }
 
-# RDS - publicly accessible so Lambda outside a VPC can reach it (skips
-# needing a NAT gateway). not how I'd do this for something real.
-
-resource "aws_security_group" "rds_sg" {
-  name        = "${var.project_name}-rds-sg"
-  description = "Allow Postgres access for coursework RDS instance"
-
-  ingress {
-    from_port   = 5432
-    to_port     = 5432
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
+# Shared VPC placement for every Lambda: private subnets, Lambda security
+# group. Kept in a local so all functions stay identical and there is one
+# place to change it.
+locals {
+  lambda_vpc_subnets = aws_subnet.private[*].id
+  lambda_vpc_sg      = [aws_security_group.lambda_sg.id]
 }
 
 resource "aws_db_instance" "postgres" {
@@ -43,11 +29,12 @@ resource "aws_db_instance" "postgres" {
   db_name                = var.db_name
   username               = var.db_username
   password               = var.db_password
-  publicly_accessible    = true
-  vpc_security_group_ids = [aws_security_group.rds_sg.id]
+  publicly_accessible    = false
+  vpc_security_group_ids = [aws_security_group.rds_private_sg.id]
+  db_subnet_group_name   = aws_db_subnet_group.main.name
   skip_final_snapshot    = true
-  storage_encrypted   = true
-  snapshot_identifier = "event-app-db-enc"
+  storage_encrypted      = true
+  snapshot_identifier    = "event-app-db-enc"
 }
 
 # run build-lambda.ps1 before applying
@@ -79,6 +66,13 @@ resource "aws_iam_role_policy_attachment" "lambda_basic" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
 
+# Required once the functions run inside a VPC: lets Lambda create and delete
+# the elastic network interfaces it uses to attach to the private subnets.
+resource "aws_iam_role_policy_attachment" "lambda_vpc" {
+  role       = aws_iam_role.lambda_exec.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
+}
+
 resource "aws_lambda_function" "create_event" {
   function_name    = "${var.project_name}-create-event"
   filename         = "${path.module}/../../lambda/events.zip"
@@ -88,6 +82,11 @@ resource "aws_lambda_function" "create_event" {
   role             = aws_iam_role.lambda_exec.arn
   layers           = [aws_lambda_layer_version.db_layer.arn]
   timeout          = 10
+
+  vpc_config {
+    subnet_ids         = local.lambda_vpc_subnets
+    security_group_ids = local.lambda_vpc_sg
+  }
 
   environment {
     variables = {
@@ -109,6 +108,11 @@ resource "aws_lambda_function" "book_event" {
   layers           = [aws_lambda_layer_version.db_layer.arn]
   timeout          = 10
 
+  vpc_config {
+    subnet_ids         = local.lambda_vpc_subnets
+    security_group_ids = local.lambda_vpc_sg
+  }
+
   environment {
     variables = {
       DATABASE_URL       = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
@@ -129,6 +133,11 @@ resource "aws_lambda_function" "list_events" {
   layers           = [aws_lambda_layer_version.db_layer.arn]
   timeout          = 10
 
+  vpc_config {
+    subnet_ids         = local.lambda_vpc_subnets
+    security_group_ids = local.lambda_vpc_sg
+  }
+
   environment {
     variables = {
       DATABASE_URL = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
@@ -145,6 +154,11 @@ resource "aws_lambda_function" "health" {
   role             = aws_iam_role.lambda_exec.arn
   layers           = [aws_lambda_layer_version.db_layer.arn]
   timeout          = 5
+
+  vpc_config {
+    subnet_ids         = local.lambda_vpc_subnets
+    security_group_ids = local.lambda_vpc_sg
+  }
 
   environment {
     variables = {
@@ -165,6 +179,11 @@ resource "aws_lambda_function" "replicate_events" {
   layers           = [aws_lambda_layer_version.db_layer.arn]
   timeout          = 10
 
+  vpc_config {
+    subnet_ids         = local.lambda_vpc_subnets
+    security_group_ids = local.lambda_vpc_sg
+  }
+
   environment {
     variables = {
       DATABASE_URL       = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
@@ -182,6 +201,11 @@ resource "aws_lambda_function" "replicate_bookings" {
   role             = aws_iam_role.lambda_exec.arn
   layers           = [aws_lambda_layer_version.db_layer.arn]
   timeout          = 10
+
+  vpc_config {
+    subnet_ids         = local.lambda_vpc_subnets
+    security_group_ids = local.lambda_vpc_sg
+  }
 
   environment {
     variables = {
@@ -201,6 +225,11 @@ resource "aws_lambda_function" "replicate_users" {
   layers           = [aws_lambda_layer_version.db_layer.arn]
   timeout          = 10
 
+  vpc_config {
+    subnet_ids         = local.lambda_vpc_subnets
+    security_group_ids = local.lambda_vpc_sg
+  }
+
   environment {
     variables = {
       DATABASE_URL       = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
@@ -218,6 +247,11 @@ resource "aws_lambda_function" "reconcile" {
   role             = aws_iam_role.lambda_exec.arn
   layers           = [aws_lambda_layer_version.db_layer.arn]
   timeout          = 60
+
+  vpc_config {
+    subnet_ids         = local.lambda_vpc_subnets
+    security_group_ids = local.lambda_vpc_sg
+  }
 
   environment {
     variables = {
@@ -240,6 +274,11 @@ resource "aws_lambda_function" "register" {
   layers           = [aws_lambda_layer_version.db_layer.arn]
   timeout          = 10
 
+  vpc_config {
+    subnet_ids         = local.lambda_vpc_subnets
+    security_group_ids = local.lambda_vpc_sg
+  }
+
   environment {
     variables = {
       DATABASE_URL       = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
@@ -260,6 +299,11 @@ resource "aws_lambda_function" "login" {
   layers           = [aws_lambda_layer_version.db_layer.arn]
   timeout          = 10
 
+  vpc_config {
+    subnet_ids         = local.lambda_vpc_subnets
+    security_group_ids = local.lambda_vpc_sg
+  }
+
   environment {
     variables = {
       DATABASE_URL = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
@@ -277,6 +321,11 @@ resource "aws_lambda_function" "me" {
   role             = aws_iam_role.lambda_exec.arn
   layers           = [aws_lambda_layer_version.db_layer.arn]
   timeout          = 10
+
+  vpc_config {
+    subnet_ids         = local.lambda_vpc_subnets
+    security_group_ids = local.lambda_vpc_sg
+  }
 
   environment {
     variables = {
@@ -296,6 +345,11 @@ resource "aws_lambda_function" "forgot_password" {
   layers           = [aws_lambda_layer_version.db_layer.arn]
   timeout          = 10
 
+  vpc_config {
+    subnet_ids         = local.lambda_vpc_subnets
+    security_group_ids = local.lambda_vpc_sg
+  }
+
   environment {
     variables = {
       DATABASE_URL = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
@@ -312,6 +366,11 @@ resource "aws_lambda_function" "reset_password" {
   role             = aws_iam_role.lambda_exec.arn
   layers           = [aws_lambda_layer_version.db_layer.arn]
   timeout          = 10
+
+  vpc_config {
+    subnet_ids         = local.lambda_vpc_subnets
+    security_group_ids = local.lambda_vpc_sg
+  }
 
   environment {
     variables = {
@@ -337,6 +396,11 @@ resource "aws_lambda_function" "update_profile" {
   layers           = [aws_lambda_layer_version.db_layer.arn]
   timeout          = 10
 
+  vpc_config {
+    subnet_ids         = local.lambda_vpc_subnets
+    security_group_ids = local.lambda_vpc_sg
+  }
+
   environment {
     variables = {
       DATABASE_URL       = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
@@ -356,6 +420,11 @@ resource "aws_lambda_function" "change_password" {
   role             = aws_iam_role.lambda_exec.arn
   layers           = [aws_lambda_layer_version.db_layer.arn]
   timeout          = 10
+
+  vpc_config {
+    subnet_ids         = local.lambda_vpc_subnets
+    security_group_ids = local.lambda_vpc_sg
+  }
 
   environment {
     variables = {
@@ -377,6 +446,11 @@ resource "aws_lambda_function" "cancel_event" {
   layers           = [aws_lambda_layer_version.db_layer.arn]
   timeout          = 10
 
+  vpc_config {
+    subnet_ids         = local.lambda_vpc_subnets
+    security_group_ids = local.lambda_vpc_sg
+  }
+
   environment {
     variables = {
       DATABASE_URL       = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
@@ -396,6 +470,11 @@ resource "aws_lambda_function" "cancel_booking" {
   role             = aws_iam_role.lambda_exec.arn
   layers           = [aws_lambda_layer_version.db_layer.arn]
   timeout          = 10
+
+  vpc_config {
+    subnet_ids         = local.lambda_vpc_subnets
+    security_group_ids = local.lambda_vpc_sg
+  }
 
   environment {
     variables = {
@@ -417,6 +496,11 @@ resource "aws_lambda_function" "my_events" {
   layers           = [aws_lambda_layer_version.db_layer.arn]
   timeout          = 10
 
+  vpc_config {
+    subnet_ids         = local.lambda_vpc_subnets
+    security_group_ids = local.lambda_vpc_sg
+  }
+
   environment {
     variables = {
       DATABASE_URL = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
@@ -434,6 +518,11 @@ resource "aws_lambda_function" "my_bookings" {
   role             = aws_iam_role.lambda_exec.arn
   layers           = [aws_lambda_layer_version.db_layer.arn]
   timeout          = 10
+
+  vpc_config {
+    subnet_ids         = local.lambda_vpc_subnets
+    security_group_ids = local.lambda_vpc_sg
+  }
 
   environment {
     variables = {
@@ -455,6 +544,11 @@ resource "aws_lambda_function" "payments" {
   layers           = [aws_lambda_layer_version.db_layer.arn]
   timeout          = 10
 
+  vpc_config {
+    subnet_ids         = local.lambda_vpc_subnets
+    security_group_ids = local.lambda_vpc_sg
+  }
+
   environment {
     variables = {
       DATABASE_URL       = "postgresql://${var.db_username}:${var.db_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
@@ -473,6 +567,11 @@ resource "aws_lambda_function" "replicate_payments" {
   role             = aws_iam_role.lambda_exec.arn
   layers           = [aws_lambda_layer_version.db_layer.arn]
   timeout          = 10
+
+  vpc_config {
+    subnet_ids         = local.lambda_vpc_subnets
+    security_group_ids = local.lambda_vpc_sg
+  }
 
   environment {
     variables = {
@@ -493,6 +592,11 @@ resource "aws_lambda_function" "list_notifications" {
   role             = aws_iam_role.lambda_exec.arn
   layers           = [aws_lambda_layer_version.db_layer.arn]
   timeout          = 10
+
+  vpc_config {
+    subnet_ids         = local.lambda_vpc_subnets
+    security_group_ids = local.lambda_vpc_sg
+  }
 
   environment {
     variables = {
