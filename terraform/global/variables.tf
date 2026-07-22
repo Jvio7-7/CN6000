@@ -21,3 +21,9 @@ variable "record_name" {
   type        = string
   default     = "api"
 }
+
+variable "replication_secret" {
+  description = "Shared secret for the /replicate/* endpoints - MUST match the value in terraform/aws exactly"
+  type        = string
+  sensitive   = true
+}
