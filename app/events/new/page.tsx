@@ -88,8 +88,12 @@ export default function NewEventPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({
+          // `date` and `time` are what the user picked in their own local zone.
+          // Build a Date from the local parts and send it as a UTC ISO string,
+          // so the backend (which runs in UTC) compares against the same instant
+          // the user meant rather than misreading the wall-clock time as UTC.
           title,
-          date: `${date}T${time}:00`,
+          date: new Date(`${date}T${time}:00`).toISOString(),
           location,
           capacity: Number(capacity),
           price: price ? Number(price) : 0,
