@@ -97,6 +97,7 @@ resource "azurerm_linux_function_app" "main" {
     AWS_BASE_URL             = var.aws_base_url
     JWT_SECRET               = var.jwt_secret
     REPLICATION_SECRET       = var.replication_secret
+    RECOVERY_SECRET          = var.recovery_secret
   }
   lifecycle {
     ignore_changes = [

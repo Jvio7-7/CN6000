@@ -43,3 +43,9 @@ variable "replication_secret" {
   type        = string
   sensitive   = true
 }
+
+variable "aws_base_url_host" {
+  description = "AWS API Gateway host only, no scheme, for the Application Insights availability test"
+  type        = string
+  default     = "l30myjhqlk.execute-api.ap-southeast-1.amazonaws.com"
+}
