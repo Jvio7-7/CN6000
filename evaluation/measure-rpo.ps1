@@ -6,8 +6,8 @@
 # through the outage, bring the cloud back, then run verify-rpo.ps1.
 
 # point this at whichever cloud stays UP
-$apiBase = "https://l30myjhqlk.execute-api.ap-southeast-1.amazonaws.com"  # AWS up
-# $apiBase = "https://eventapp-func-zhw36q.azurewebsites.net/api"         # Azure up
+# $apiBase = "https://l30myjhqlk.execute-api.ap-southeast-1.amazonaws.com"  # AWS up
+$apiBase = "https://eventapp-func-zhw36q.azurewebsites.net/api"         # Azure up
 # the Azure base already has /api so the path below stays the same either way
 
 $runId   = Get-Date -Format "MMddHHmmss"   # unique tag so reruns don't collide
@@ -38,7 +38,7 @@ while ($true) {
     try {
         $r = Invoke-WebRequest -Uri "$apiBase/users/register" -Method POST `
              -Body $body -ContentType "application/json" `
-             -UseBasicParsing -TimeoutSec 5
+             -UseBasicParsing -TimeoutSec 15
         $status = $r.StatusCode
     } catch {
         # capture http status if there is one, else the error text
