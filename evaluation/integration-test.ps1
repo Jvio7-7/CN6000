@@ -32,13 +32,29 @@ function Call($method, $url, $body, $token) {
     }
 }
 
+# every check is recorded as well as printed, so the run leaves a CSV behind
+# rather than only console output that scrolls away
+$script:results = @()
+
 function Check($name, $condition, $detail) {
     if ($condition) {
         $script:pass++
         Write-Host "  PASS  $name"
+        $script:results += [pscustomobject]@{
+            timestamp = (Get-Date -Format "HH:mm:ss.fff")
+            check     = $name
+            result    = "PASS"
+            detail    = ""
+        }
     } else {
         $script:fail++
         Write-Host "  FAIL  $name   ($detail)" -ForegroundColor Red
+        $script:results += [pscustomobject]@{
+            timestamp = (Get-Date -Format "HH:mm:ss.fff")
+            check     = $name
+            result    = "FAIL"
+            detail    = $detail
+        }
     }
 }
 
@@ -155,7 +171,12 @@ Start-Sleep -Seconds 2
 $r = Call GET "$api/notifications" $null $attToken
 Check "attendee got refund notification" ($r.data.Count -gt 0) "no notifications"
 
+$runId   = Get-Date -Format "MMddHHmmss"
+$outFile = "integration-test-$Target-$runId.csv"
+$script:results | Export-Csv -Path $outFile -NoTypeInformation -Encoding UTF8
+
 Write-Host "`n===== $Target : $pass passed, $fail failed ====="
+Write-Host "results saved to $outFile"
 Write-Host "test data tagged '$tag'. it makes events/bookings/payments too,"
 Write-Host "so delete child rows first or the FKs block it. run on BOTH clouds:"
 Write-Host "  DELETE FROM notifications WHERE recipient_email LIKE '$tag%';"

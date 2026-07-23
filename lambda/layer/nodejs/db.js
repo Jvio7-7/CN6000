@@ -192,42 +192,68 @@ async function replicateEvent(record) {
 
 // Bookings - same ownership + soft-delete pattern as events
 
+// The capacity check and the insert run inside one transaction, with the
+// event row locked (SELECT ... FOR UPDATE). Without the lock, two concurrent
+// bookings could both read the same seat count, both decide there is room,
+// and both insert - taking the event over capacity. The lock serialises
+// bookings for a given event so the count a request reads is still true when
+// it inserts. Replication and the notification happen after the commit, so a
+// slow network call never holds the row lock.
 async function createBooking({ userId, eventId, attendeeName, attendeeEmail }) {
   const db = getPool();
+  const client = await db.connect();
+  let record;
 
-  const dup = await db.query(
-    `SELECT id FROM bookings WHERE user_id = $1 AND event_id = $2 AND cancelled_at IS NULL`,
-    [userId, eventId]
-  );
-  if (dup.rows[0]) {
-    throw new ValidationError('You\u2019ve already booked a spot for this event');
+  try {
+    await client.query('BEGIN');
+
+    // locking the event row is what serialises concurrent bookings
+    const eventResult = await client.query(
+      'SELECT user_id, capacity FROM events WHERE id = $1 FOR UPDATE',
+      [eventId]
+    );
+    const event = eventResult.rows[0];
+    if (!event) {
+      throw new ValidationError('Event not found');
+    }
+    if (event.user_id.toLowerCase() === userId.toLowerCase()) {
+      throw new ValidationError('You can\u2019t book your own event');
+    }
+
+    const dup = await client.query(
+      `SELECT id FROM bookings WHERE user_id = $1 AND event_id = $2 AND cancelled_at IS NULL`,
+      [userId, eventId]
+    );
+    if (dup.rows[0]) {
+      throw new ValidationError('You\u2019ve already booked a spot for this event');
+    }
+
+    const countResult = await client.query(
+      `SELECT COUNT(*) AS count FROM bookings WHERE event_id = $1 AND cancelled_at IS NULL`,
+      [eventId]
+    );
+    if (Number(countResult.rows[0].count) >= event.capacity) {
+      throw new ValidationError('This event is full');
+    }
+
+    const id = crypto.randomUUID();
+    const result = await client.query(
+      `INSERT INTO bookings (id, user_id, event_id, attendee_name, attendee_email, origin_cloud)
+       VALUES ($1, $2, $3, $4, $5, 'aws')
+       RETURNING id, user_id, event_id, attendee_name, attendee_email, cancelled_at, created_at, origin_cloud`,
+      [id, userId, eventId, attendeeName, attendeeEmail]
+    );
+    record = result.rows[0];
+
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
   }
 
-  const eventResult = await db.query('SELECT user_id, capacity FROM events WHERE id = $1', [eventId]);
-  const event = eventResult.rows[0];
-  if (!event) {
-    throw new ValidationError('Event not found');
-  }
-  if (event.user_id.toLowerCase() === userId.toLowerCase()) {
-    throw new ValidationError('You can\u2019t book your own event');
-  }
-  const countResult = await db.query(
-    `SELECT COUNT(*) AS count FROM bookings WHERE event_id = $1 AND cancelled_at IS NULL`,
-    [eventId]
-  );
-  if (Number(countResult.rows[0].count) >= event.capacity) {
-    throw new ValidationError('This event is full');
-  }
-
-  const id = crypto.randomUUID();
-  const result = await db.query(
-    `INSERT INTO bookings (id, user_id, event_id, attendee_name, attendee_email, origin_cloud)
-     VALUES ($1, $2, $3, $4, $5, 'aws')
-     RETURNING id, user_id, event_id, attendee_name, attendee_email, cancelled_at, created_at, origin_cloud`,
-    [id, userId, eventId, attendeeName, attendeeEmail]
-  );
-  const record = result.rows[0];
-
+  const id = record.id;
   await replicateToAzure('/replicate/bookings', record);
 
   try {

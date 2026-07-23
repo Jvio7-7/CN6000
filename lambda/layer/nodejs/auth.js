@@ -1,5 +1,6 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 
 // same secret on both clouds so a token works on either side
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -47,12 +48,22 @@ function validatePassword(password) {
 // Shared-secret check for the internal replication endpoints. These are
 // published on the same public API Gateway as everything else, so without
 // this any caller could write straight into the database.
+// Constant-time secret comparison. Hashing both sides first gives them a
+// fixed length, so timingSafeEqual never throws on a length mismatch, and
+// the comparison does not leak how many leading characters matched.
+function secretsMatch(supplied, expected) {
+  if (typeof supplied !== 'string' || typeof expected !== 'string') return false;
+  const a = crypto.createHash('sha256').update(supplied).digest();
+  const b = crypto.createHash('sha256').update(expected).digest();
+  return crypto.timingSafeEqual(a, b);
+}
+
 function checkReplicationKey(event) {
   const expected = process.env.REPLICATION_SECRET;
   if (!expected) return false;
   const headers = event && event.headers ? event.headers : {};
   const supplied = headers['x-replication-key'] || headers['X-Replication-Key'];
-  return supplied === expected;
+  return secretsMatch(supplied, expected);
 }
 
 module.exports = {

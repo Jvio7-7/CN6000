@@ -647,6 +647,42 @@ resource "aws_apigatewayv2_stage" "default" {
   api_id      = aws_apigatewayv2_api.http_api.id
   name        = "$default"
   auto_deploy = true
+
+  # Request throttling. The default applies to every route and is a ceiling on
+  # overall traffic. The credential-handling routes get much tighter limits,
+  # since those are the ones worth guessing against: a password-guessing run
+  # is slowed to a crawl while a real person signing in is never near the cap.
+  default_route_settings {
+    throttling_rate_limit  = 50
+    throttling_burst_limit = 100
+  }
+
+  route_settings {
+    route_key              = "POST /users/login"
+    throttling_rate_limit  = 5
+    throttling_burst_limit = 10
+  }
+
+  route_settings {
+    route_key              = "POST /users/forgot-password"
+    throttling_rate_limit  = 3
+    throttling_burst_limit = 6
+  }
+
+  route_settings {
+    route_key              = "POST /users/reset-password"
+    throttling_rate_limit  = 3
+    throttling_burst_limit = 6
+  }
+
+  # Registration is deliberately looser than the other credential routes: it
+  # is the write path the load tests drive, so the limit sits well above the
+  # measured throughput and does not distort those results.
+  route_settings {
+    route_key              = "POST /users/register"
+    throttling_rate_limit  = 25
+    throttling_burst_limit = 50
+  }
 }
 
 resource "aws_apigatewayv2_integration" "create_event" {

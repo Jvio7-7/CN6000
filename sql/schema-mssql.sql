@@ -35,7 +35,7 @@ CREATE TABLE users (
   password_hash NVARCHAR(255) NOT NULL,
   security_question NVARCHAR(255) NOT NULL,
   security_answer_hash NVARCHAR(255) NOT NULL,
-  created_at DATETIME NOT NULL DEFAULT GETDATE(),
+  created_at DATETIME NOT NULL DEFAULT GETUTCDATE(),
   deleted_at DATETIME,
   origin_cloud NVARCHAR(10) NOT NULL DEFAULT 'azure'
 );
@@ -61,7 +61,7 @@ CREATE TABLE bookings (
   attendee_name NVARCHAR(255) NOT NULL,
   attendee_email NVARCHAR(255) NOT NULL,
   cancelled_at DATETIME,
-  created_at DATETIME NOT NULL DEFAULT GETDATE(),
+  created_at DATETIME NOT NULL DEFAULT GETUTCDATE(),
   origin_cloud NVARCHAR(10) NOT NULL DEFAULT 'azure',
   CONSTRAINT FK_bookings_events FOREIGN KEY (event_id) REFERENCES events(id),
   CONSTRAINT FK_bookings_users FOREIGN KEY (user_id) REFERENCES users(id)
@@ -75,7 +75,7 @@ CREATE TABLE payments (
   currency NVARCHAR(3) NOT NULL DEFAULT 'USD',
   card_last4 NVARCHAR(4) NOT NULL,
   status NVARCHAR(20) NOT NULL,
-  created_at DATETIME NOT NULL DEFAULT GETDATE(),
+  created_at DATETIME NOT NULL DEFAULT GETUTCDATE(),
   origin_cloud NVARCHAR(10) NOT NULL DEFAULT 'azure',
   CONSTRAINT FK_payments_bookings FOREIGN KEY (booking_id) REFERENCES bookings(id)
 );
@@ -87,6 +87,6 @@ CREATE TABLE notifications (
   body NVARCHAR(MAX) NOT NULL,
   related_booking_id UNIQUEIDENTIFIER,
   status NVARCHAR(20) NOT NULL DEFAULT 'sent',
-  created_at DATETIME NOT NULL DEFAULT GETDATE(),
+  created_at DATETIME NOT NULL DEFAULT GETUTCDATE(),
   origin_cloud NVARCHAR(10) NOT NULL DEFAULT 'azure'
 );

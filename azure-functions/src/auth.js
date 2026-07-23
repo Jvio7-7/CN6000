@@ -1,5 +1,6 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 
 // must match the AWS side exactly
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -43,10 +44,20 @@ function validatePassword(password) {
 
 // Shared-secret check for the internal replication endpoints. Azure Functions
 // v4 exposes headers as a Headers object, hence .get() rather than indexing.
+// Constant-time secret comparison. Hashing both sides first gives them a
+// fixed length, so timingSafeEqual never throws on a length mismatch, and
+// the comparison does not leak how many leading characters matched.
+function secretsMatch(supplied, expected) {
+  if (typeof supplied !== 'string' || typeof expected !== 'string') return false;
+  const a = crypto.createHash('sha256').update(supplied).digest();
+  const b = crypto.createHash('sha256').update(expected).digest();
+  return crypto.timingSafeEqual(a, b);
+}
+
 function checkReplicationKey(request) {
   const expected = process.env.REPLICATION_SECRET;
   if (!expected) return false;
-  return request.headers.get('x-replication-key') === expected;
+  return secretsMatch(request.headers.get('x-replication-key'), expected);
 }
 
 module.exports = {
@@ -56,4 +67,5 @@ module.exports = {
   verifyToken,
   validatePassword,
   checkReplicationKey,
+  secretsMatch,
 };

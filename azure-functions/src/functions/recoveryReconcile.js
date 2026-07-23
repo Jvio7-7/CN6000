@@ -1,5 +1,6 @@
 const { app } = require('@azure/functions');
 const { reconcileToPeer } = require('../db');
+const { secretsMatch } = require('../auth');
 
 // Dedicated recovery handler. Azure Monitor calls this when its availability
 // test for the AWS endpoint transitions back to healthy (AWS recovered). It
@@ -27,7 +28,7 @@ app.http('recoveryReconcile', {
   route: 'internal/recovery-reconcile',
   handler: async (request, context) => {
     const supplied = request.query.get('key');
-    if (!process.env.RECOVERY_SECRET || supplied !== process.env.RECOVERY_SECRET) {
+    if (!secretsMatch(supplied, process.env.RECOVERY_SECRET)) {
       return { status: 401, jsonBody: { error: 'Unauthorized' } };
     }
 

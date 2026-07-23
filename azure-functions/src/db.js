@@ -125,7 +125,7 @@ async function cancelEvent(eventId, userId) {
     .input('id', sql.UniqueIdentifier, eventId)
     .input('userId', sql.UniqueIdentifier, userId)
     .query(
-      `UPDATE events SET cancelled_at = GETDATE()
+      `UPDATE events SET cancelled_at = GETUTCDATE()
        OUTPUT INSERTED.id, INSERTED.user_id, INSERTED.title, INSERTED.event_date, INSERTED.location, INSERTED.capacity, INSERTED.price, INSERTED.cancelled_at, INSERTED.origin_cloud
        WHERE id = @id AND user_id = @userId AND cancelled_at IS NULL`
     );
@@ -219,52 +219,68 @@ async function replicateEvent(record) {
 
 // Bookings - same ownership + soft-delete pattern
 
+// The capacity check and the insert run inside one transaction, with the
+// event row locked (UPDLOCK, HOLDLOCK). Without the lock, two concurrent
+// bookings could both read the same seat count, both decide there is room,
+// and both insert - taking the event over capacity. The lock serialises
+// bookings for a given event so the count a request reads is still true when
+// it inserts. Replication and the notification happen after the commit, so a
+// slow network call never holds the row lock.
 async function createBooking({ userId, eventId, attendeeName, attendeeEmail }) {
   const pool = await getPool();
+  const transaction = new sql.Transaction(pool);
+  let record;
 
-  const dup = await pool
-    .request()
-    .input('userId', sql.UniqueIdentifier, userId)
-    .input('eventId', sql.UniqueIdentifier, eventId)
-    .query('SELECT id FROM bookings WHERE user_id = @userId AND event_id = @eventId AND cancelled_at IS NULL');
-  if (dup.recordset[0]) {
-    throw new ValidationError('You\u2019ve already booked a spot for this event');
+  await transaction.begin();
+  try {
+    // locking the event row is what serialises concurrent bookings
+    const eventResult = await new sql.Request(transaction)
+      .input('eventId', sql.UniqueIdentifier, eventId)
+      .query('SELECT user_id, capacity FROM events WITH (UPDLOCK, HOLDLOCK) WHERE id = @eventId');
+    const eventRow = eventResult.recordset[0];
+    if (!eventRow) {
+      throw new ValidationError('Event not found');
+    }
+    if (eventRow.user_id.toLowerCase() === userId.toLowerCase()) {
+      throw new ValidationError('You can\u2019t book your own event');
+    }
+
+    const dup = await new sql.Request(transaction)
+      .input('userId', sql.UniqueIdentifier, userId)
+      .input('eventId', sql.UniqueIdentifier, eventId)
+      .query('SELECT id FROM bookings WHERE user_id = @userId AND event_id = @eventId AND cancelled_at IS NULL');
+    if (dup.recordset[0]) {
+      throw new ValidationError('You\u2019ve already booked a spot for this event');
+    }
+
+    const countResult = await new sql.Request(transaction)
+      .input('eventId', sql.UniqueIdentifier, eventId)
+      .query('SELECT COUNT(*) AS count FROM bookings WHERE event_id = @eventId AND cancelled_at IS NULL');
+    if (Number(countResult.recordset[0].count) >= eventRow.capacity) {
+      throw new ValidationError('This event is full');
+    }
+
+    const newId = crypto.randomUUID();
+    const result = await new sql.Request(transaction)
+      .input('id', sql.UniqueIdentifier, newId)
+      .input('userId', sql.UniqueIdentifier, userId)
+      .input('eventId', sql.UniqueIdentifier, eventId)
+      .input('attendeeName', sql.NVarChar, attendeeName)
+      .input('attendeeEmail', sql.NVarChar, attendeeEmail)
+      .query(
+        `INSERT INTO bookings (id, user_id, event_id, attendee_name, attendee_email, origin_cloud)
+         OUTPUT INSERTED.id, INSERTED.user_id, INSERTED.event_id, INSERTED.attendee_name, INSERTED.attendee_email, INSERTED.cancelled_at, INSERTED.created_at, INSERTED.origin_cloud
+         VALUES (@id, @userId, @eventId, @attendeeName, @attendeeEmail, 'azure')`
+      );
+    record = result.recordset[0];
+
+    await transaction.commit();
+  } catch (err) {
+    await transaction.rollback().catch(() => {});
+    throw err;
   }
 
-  const eventResult = await pool
-    .request()
-    .input('eventId', sql.UniqueIdentifier, eventId)
-    .query('SELECT user_id, capacity FROM events WHERE id = @eventId');
-  const eventRow = eventResult.recordset[0];
-  if (!eventRow) {
-    throw new ValidationError('Event not found');
-  }
-  if (eventRow.user_id.toLowerCase() === userId.toLowerCase()) {
-    throw new ValidationError('You can\u2019t book your own event');
-  }
-  const countResult = await pool
-    .request()
-    .input('eventId', sql.UniqueIdentifier, eventId)
-    .query('SELECT COUNT(*) AS count FROM bookings WHERE event_id = @eventId AND cancelled_at IS NULL');
-  if (Number(countResult.recordset[0].count) >= eventRow.capacity) {
-    throw new ValidationError('This event is full');
-  }
-
-  const id = crypto.randomUUID();
-  const result = await pool
-    .request()
-    .input('id', sql.UniqueIdentifier, id)
-    .input('userId', sql.UniqueIdentifier, userId)
-    .input('eventId', sql.UniqueIdentifier, eventId)
-    .input('attendeeName', sql.NVarChar, attendeeName)
-    .input('attendeeEmail', sql.NVarChar, attendeeEmail)
-    .query(
-      `INSERT INTO bookings (id, user_id, event_id, attendee_name, attendee_email, origin_cloud)
-       OUTPUT INSERTED.id, INSERTED.user_id, INSERTED.event_id, INSERTED.attendee_name, INSERTED.attendee_email, INSERTED.cancelled_at, INSERTED.created_at, INSERTED.origin_cloud
-       VALUES (@id, @userId, @eventId, @attendeeName, @attendeeEmail, 'azure')`
-    );
-  const record = result.recordset[0];
-
+  const id = record.id;
   await replicateToAws('/replicate/bookings', record);
 
   try {
@@ -309,7 +325,7 @@ async function cancelBookingInternal(bookingId, userId = null) {
   }
 
   const result = await request.query(
-    `UPDATE bookings SET cancelled_at = GETDATE()
+    `UPDATE bookings SET cancelled_at = GETUTCDATE()
      OUTPUT INSERTED.id, INSERTED.user_id, INSERTED.event_id, INSERTED.attendee_name, INSERTED.attendee_email, INSERTED.cancelled_at, INSERTED.created_at, INSERTED.origin_cloud
      WHERE ${where}`
   );
@@ -489,7 +505,7 @@ async function deleteAccount(userId) {
     .request()
     .input('uid', sql.UniqueIdentifier, userId)
     .query(
-      `UPDATE bookings SET cancelled_at = GETDATE()
+      `UPDATE bookings SET cancelled_at = GETUTCDATE()
        OUTPUT INSERTED.id, INSERTED.user_id, INSERTED.event_id, INSERTED.attendee_name, INSERTED.attendee_email, INSERTED.cancelled_at, INSERTED.created_at, INSERTED.origin_cloud
        WHERE user_id = @uid AND cancelled_at IS NULL`
     );
@@ -513,7 +529,7 @@ async function deleteAccount(userId) {
     .query(
       `UPDATE users
          SET name = 'Deleted user', email = @email, password_hash = '',
-             security_question = '', security_answer_hash = '', deleted_at = GETDATE()
+             security_question = '', security_answer_hash = '', deleted_at = GETUTCDATE()
        OUTPUT INSERTED.id, INSERTED.name, INSERTED.email, INSERTED.password_hash, INSERTED.security_question, INSERTED.security_answer_hash, INSERTED.deleted_at, INSERTED.origin_cloud
        WHERE id = @id AND deleted_at IS NULL`
     );
