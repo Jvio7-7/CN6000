@@ -47,7 +47,9 @@ cd terraform\aws
 terraform apply
 ```
 
-Run the schema on RDS:
+Run the schema on RDS. RDS sits in private subnets, so this has to run
+from inside the VPC (a small helper Lambda or an EC2/bastion in the same
+VPC) rather than straight from a laptop:
 ```powershell
 psql -h <rds_endpoint> -U eventappadmin -d eventdb -f ..\..\sql\schema-postgres.sql
 ```
@@ -87,10 +89,9 @@ so this project uses v4.
 ## Deploying: accounts, cancellation, and password reset
 
 New `user_id`/`cancelled_at` columns on events and bookings, plus
-`security_question`/`security_answer_hash` on users (replacing the
-email-based verification/reset this went through earlier - see "Why not
-email verification" below for why). No SES, no email service, no
-external account setup needed at all this time - just code and schema.
+`security_question`/`security_answer_hash` on users (see "Why not email
+verification" below). No email service or external account setup needed -
+just code and schema.
 
 **Step A - rebuild and redeploy AWS:**
 ```powershell
@@ -126,7 +127,7 @@ changed):
 
 A batch of real business rules, not just UI polish:
 
-- Event time uses a native time input (5-minute step) and can't be set
+- Event time uses the browser/OS native time picker and can't be set
   in the past - checked client-side and again server-side
 - Past events fold into a collapsible "Old events" section on the
   homepage instead of disappearing or cluttering the main list
@@ -208,24 +209,15 @@ background request gets killed before it finishes.
 
 ## Why not email verification
 
-Tried this twice, actually - a full email-verification-at-signup flow
-plus a 6-digit-code password reset, both via AWS SES. Removed both and
-replaced them with a security question set at signup instead. The
-reason is a hard platform limit, not a change of taste: SES starts in
-sandbox mode, which only sends to individually *verified* recipient
-addresses, and as of 2024 AWS requires a domain with SPF/DKIM/DMARC DNS
-records configured before it will even consider lifting that
-restriction. Getting SES out of sandbox (domain identity, SPF/DKIM/DMARC,
-a production-access request) was more setup than this project needed just
-for signup email, so it only ever sent to a handful of manually verified
-addresses - which doesn't scale to "works for anyone who signs up".
+Real email delivery needs an external provider set up properly (a verified
+sending domain, SPF/DKIM/DMARC, and lifting AWS SES out of its sandbox), and
+neither cloud does it out of the box - that's outside the scope of this
+project, so signup email was left out.
 
-Security questions need no external service at all: the registrant
-writes their own question and answer at signup (`security_question` is
-plain text, `security_answer_hash` is bcrypt-hashed the same way a
-password is), and resetting a password means answering it correctly.
-Both signup and login work immediately again, no verification step
-in between.
+Instead, accounts use a security question set at signup: the registrant
+writes their own question and answer (`security_question` is plain text,
+`security_answer_hash` is bcrypt-hashed like a password), and a password
+reset means answering it correctly. No external service needed.
 
 ## Password reset (security question)
 
@@ -265,10 +257,10 @@ already exists.
 
 ## Why not Azure AD
 
-The plan was to use Azure AD, but the university tenant blocks students
-from registering applications, which Azure AD login needs. Built a
-custom JWT system instead - same secret on both clouds, so a login on
-AWS works when checking `/users/me` on Azure and vice versa.
+The plan was to use Azure AD, but the university tenant doesn't give
+students permission to register an application, which Azure AD login
+needs. Built a custom JWT system instead - same secret on both clouds,
+so a login on AWS works when checking `/users/me` on Azure and vice versa.
 
 ## Payments
 

@@ -136,7 +136,6 @@ export default function NewEventPage() {
               id="time"
               required
               type="time"
-              step={300}
               min={minTime}
               value={time}
               onChange={(e) => setTime(e.target.value)}
