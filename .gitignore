@@ -22,3 +22,6 @@ azure-functions/bin/
 azure-functions/obj/
 
 
+
+# Terraform-generated trigger Lambda zip (rebuilt on apply)
+terraform/global/reconcile-trigger.zip
