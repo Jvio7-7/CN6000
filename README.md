@@ -76,25 +76,13 @@ Run the schema on Azure SQL:
 sqlcmd -S <sql_server_fqdn> -d eventdb -U eventappadmin -P <password> -i sql\schema-mssql.sql
 ```
 
-**Azure region note:** the student subscription only allows deployment to
-a handful of regions (found by trial and error - most regions come back
-with a vague "disallowed by Azure" error). Currently using
-`southeastasia`, paired with AWS `ap-southeast-1` so the two clouds are
-geographically close for a fair latency comparison later.
+**Azure region note:** the student subscription only allows a handful of
+regions. Using `southeastasia`, paired with AWS `ap-southeast-1` so the two
+clouds are geographically close for a fair latency comparison.
 
-**Node version:** both clouds now run Node 22. Azure was stuck on Node
-20 for a while - the Terraform azurerm provider (v3.x) didn't support
-declaring Node 22 for Function Apps, only the newer v4 provider did, and
-switching providers mid-project felt riskier than it was worth at the
-time. Revisited it once Azure started warning that Node 20 had reached
-end-of-life: checked the official v3 to v4 upgrade guide against every
-resource this project actually uses (storage account, Function App, SQL
-server/database/firewall rules), and none of the breaking changes in
-that guide touched anything used here - the only real changes needed
-were the provider version itself, one deprecated provider-level setting,
-and the `node_version` value. Worth checking the actual upgrade guide
-against your specific resources before assuming a major version bump is
-riskier than it is; in this case it wasn't.
+**Node version:** both clouds run Node 22. Azure needed the azurerm v4
+provider to declare Node 22 on Function Apps (v3 only went up to Node 20),
+so this project uses v4.
 
 ## Deploying: accounts, cancellation, and password reset
 
@@ -138,10 +126,8 @@ changed):
 
 A batch of real business rules, not just UI polish:
 
-- Event times snap to 5-minute steps and can't be set in the past
-  (`step`/`min` on the date input client-side, and the same "must be in
-  the future" check server-side too - client-side alone isn't real
-  enforcement)
+- Event time uses a native time input (5-minute step) and can't be set
+  in the past - checked client-side and again server-side
 - Past events fold into a collapsible "Old events" section on the
   homepage instead of disappearing or cluttering the main list
 - Hosting an event now sets a price upfront - attendees pay that exact
@@ -155,9 +141,8 @@ A batch of real business rules, not just UI polish:
 - Cancelling an event cascades: every active booking against it gets
   cancelled too, and anyone with a completed payment gets a (simulated)
   refund notification. Cancelling your own paid booking sends the same
-  kind of notification. Neither is a real refund - there's no real
-  payment processor anywhere in this project - but the notification
-  trail is genuine.
+  kind of notification. Neither is a real refund (no real payment
+  processor), just a notification row.
 
 No new Terraform resources for any of this - it's all logic inside
 Lambda functions and Azure Functions that already existed. AWS still
@@ -184,7 +169,11 @@ sqlcmd -S <sql_server_fqdn> -d eventdb -U eventappadmin -P <password> -i sql\sch
 .\deploy-frontend-azure.ps1 -StorageAccountName <storage_account_name>
 ```
 
-## Route 53 (Active/Active routing)
+## DNS and Active/Active routing
+
+The domain `gather-up.info` is registered (through IONOS) and delegated,
+so `www.gather-up.info` (frontend) and `api.gather-up.info` (API) resolve
+publicly.
 
 ```powershell
 cd terraform\global
@@ -192,14 +181,19 @@ terraform init
 terraform apply
 ```
 
-This sets up a hosted zone, health checks on both `/health` endpoints,
-and weighted DNS (50/50) between AWS and Azure. No real domain was
-bought for this - the zone isn't publicly delegated, so it's tested by
-querying the assigned name servers directly:
+`global` sets up the Route 53 hosted zone, health checks on both `/health`
+endpoints, and weighted DNS (50/50) between AWS and Azure.
 
-```powershell
-Resolve-DnsName -Name api.cn6000-jin-fyp.com -Type CNAME -Server <one of the name servers>
-```
+To avoid Route 53 itself being a single point of failure, DNS is served by
+two providers at once: Route 53 and Azure DNS, with the registrar
+delegating to name servers from both. Azure DNS (`terraform\azure-dns`)
+mirrors the zone, and a Traffic Manager profile (`terraform\traffic-manager`)
+does the weighted 50/50 on the Azure side. Both planes are compared in the
+RTO measurement.
+
+Azure DNS keeps its four system name servers on the zone apex and won't let
+them be removed, so the apex NS set isn't a clean 2+2 split - harmless here
+since every name server answers the api records correctly.
 
 ## Data replication
 
@@ -208,10 +202,9 @@ pushed to the other cloud right after the local write succeeds. UUIDs
 instead of auto-increment IDs because two clouds writing independently
 would eventually generate the same integer ID for different rows.
 
-Replication is awaited, not fire-and-forget - Lambda freezes its
-execution environment as soon as the handler returns, so an unawaited
-background request just gets killed. Found this the hard way when
-replication silently did nothing for a while.
+Replication is awaited, not fire-and-forget - Lambda freezes the
+execution environment once the handler returns, so an unawaited
+background request gets killed before it finishes.
 
 ## Why not email verification
 
@@ -222,12 +215,10 @@ reason is a hard platform limit, not a change of taste: SES starts in
 sandbox mode, which only sends to individually *verified* recipient
 addresses, and as of 2024 AWS requires a domain with SPF/DKIM/DMARC DNS
 records configured before it will even consider lifting that
-restriction. This project deliberately never bought a domain (same
-reason Route 53 uses an undelegated zone), so real email delivery to
-arbitrary registered users was never actually achievable here - only to
-whichever handful of addresses got manually verified one at a time. That
-doesn't scale to "works for anyone who signs up," which is the actual
-bar for a real account system.
+restriction. Getting SES out of sandbox (domain identity, SPF/DKIM/DMARC,
+a production-access request) was more setup than this project needed just
+for signup email, so it only ever sent to a handful of manually verified
+addresses - which doesn't scale to "works for anyone who signs up".
 
 Security questions need no external service at all: the registrant
 writes their own question and answer at signup (`security_question` is
@@ -239,24 +230,20 @@ in between.
 ## Password reset (security question)
 
 Enter your email and the account's security question comes back. Answer
-it correctly and you can set a new password, all on the same page. One
-thing to flag: if there's no account for that email, the page says so
-outright instead of the usual vague "if an account exists we've sent
-you a link". That makes it easy to check whether an email is
-registered, which a real product wouldn't want, but it keeps the flow
-much clearer to use and to demo.
+it correctly and set a new password on the same page. If no account matches
+the email, the page says so directly rather than the usual "if an account
+exists we've sent a link" - clearer to demo, though a production app would
+hide it to avoid revealing which emails are registered.
+
 The answer is compared case-insensitively and trimmed, so "Blue" and
-"blue " both match what was set at signup - this isn't a
-high-security context, being forgiving matters more than exactness.
+"blue " both match what was set at signup.
 
 ## Password policy
 
-12-24 characters, at least one uppercase letter, one lowercase letter,
-one number, and one special character. Enforced in both places that
-matter: client-side for immediate feedback (`lib/validation.ts`), and
-server-side in `auth.js` on both clouds, since client-side alone isn't
-real enforcement - the same check runs on registration, password reset,
-and password change alike, so there's no path that skips it.
+12-24 characters, with at least one uppercase, one lowercase, one number,
+and one special character. Checked client-side for feedback
+(`lib/validation.ts`) and again server-side in `auth.js` on both clouds.
+The same check runs on registration, reset, and change.
 
 ## Accounts: profile edit, password change, and ownership
 
@@ -315,33 +302,21 @@ cd ..\..
 .\deploy-frontend-azure.ps1 -StorageAccountName <storage_account_name>
 ```
 
-No CDN on the Azure side - tried to set one up but Azure stopped
-allowing new classic CDN profiles, and the replacement (Front Door) costs
-~$35/month, which isn't worth it since Azure's static website endpoint
-already does HTTPS on its own. S3 needed CloudFront because S3's website
-endpoint is HTTP only.
+No CDN on the Azure side: Front Door is blocked on the student account,
+and the static website endpoint already serves HTTPS on its own. S3 needs
+CloudFront because the S3 website endpoint is HTTP only.
 
-Two separate URLs, not one unified domain - would need an actual
-purchased domain to make one address fail over between them, which
-wasn't worth it for this.
-
-**Another real platform difference, found the hard way:** S3's website
-hosting auto-resolves an extensionless URL like `/account` to
-`account.html`. Azure Storage's static website feature has never added
-that (a genuine, still-open gap - people have been asking Microsoft
-about it for years). `next.config.js` uses `trailingSlash: true` so
-Next.js exports `account/index.html` instead - both platforms agree on
-resolving `index.html` inside a folder-style path, so this works
-identically on both clouds rather than depending on an AWS-only
-convenience. Found this by clicking a direct link on the Azure-hosted
-site and getting a 404 that the AWS-hosted site never showed.
+S3 auto-resolves an extensionless URL like `/account` to `account.html`,
+but Azure Storage's static website doesn't. `next.config.js` sets
+`trailingSlash: true` so Next.js exports `account/index.html`, which both
+clouds resolve the same way.
 
 ## Security notes
 
-RDS is publicly accessible with the security group open on 5432 - avoids
-putting Lambda in a VPC (needs a NAT gateway, extra cost). Azure SQL's
-firewall allows Azure services generally plus whatever IP I'm currently
-on.
+RDS isn't publicly accessible - it sits in private subnets, and the Lambdas
+run inside the VPC to reach it, with a NAT gateway for their outbound calls
+(replication to the other cloud). Azure SQL's firewall allows Azure services
+plus whatever IP I'm currently on.
 
 ## Tearing everything down
 

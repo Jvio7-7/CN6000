@@ -3,59 +3,63 @@
 Scripts used to measure the platform for the report. Not part of the app -
 nothing here is deployed, they just call the public APIs from a laptop.
 
-Run them from this folder. PowerShell blocks downloaded scripts, so
+Run them from this folder. PowerShell blocks downloaded scripts, so run
 `Unblock-File .\<script>.ps1` first if it complains.
 
-## Failover (RTO)
+## Failover and failback (RTO)
 
-    .\measure-rto.ps1
+    .\RTO\four-cell-rto-measurement.ps1
 
-Polls the Route 53 health checks and the weighted DNS answer once a second
-and writes `rto-log-<timestamp>.csv`. Kill a cloud in another window while
-it runs:
+Measures failover across two DNS control planes and two kill directions at
+once, so one AWS kill covers cells 1+3 and one Azure kill covers 2+4:
 
-    az functionapp stop  -g eventapp-rg -n eventapp-func-zhw36q
-    az functionapp start -g eventapp-rg -n eventapp-func-zhw36q
+              | aws kill | azure kill
+    ----------+----------+-----------
+    route53   |  cell 1  |  cell 2
+    tm        |  cell 3  |  cell 4
 
-RTO is read off the log: the row where the healthy-checker count starts
-dropping is roughly when the cloud died, and the row where the DNS share
-hits 0 is when it stopped being routed to. A real browser adds up to the
-record TTL (30s) on top of that.
+The route53 plane queries `api.gather-up.info` straight at a Route 53 name
+server; the tm plane queries the Traffic Manager name at its own
+authoritative servers, so neither goes through a caching resolver. The
+script kills a cloud, waits for the DNS answer to drop it, then restores it
+and times the failback too. It auto-restores between trials, so don't
+ctrl+c mid-run. Results go to `four-cell-rto-result.csv`.
 
 ## Data loss (RPO)
 
-    .\measure-rpo.ps1
-    .\verify-rpo.ps1 -RunId <tag printed above> -LastSeq <last seq>
+    .\RPO\measure-rpo.ps1
 
-`measure-rpo` registers a user every second against one cloud while the
-other is down. `verify-rpo` then tries to log in as each of those users on
-both clouds - 200 means the user is there, 401 means it never replicated.
-The 401s are the RPO loss.
+Runs both directions in one go. For each direction it registers a user every
+second against the surviving cloud, kills the other one partway, brings it
+back, and counts who didn't replicate. Two numbers per direction: the raw
+loss right after restore (before auto-reconcile fires), and the loss after a
+manual reconcile, which should be 0.
 
-To show the reconcile endpoint fixing it, call it and re-run verify:
-
-    curl -Method POST "<aws api>/replicate/reconcile" -UseBasicParsing
+Writes three files: a summary, a per-user register log, and a per-user verify
+log (so each lost user is traceable).
 
 ## Load test
 
     k6 run -e BASE=<cloud api url> -e RUN=aws-run1 loadtest.js
 
-Ramps virtual users against /health and /users/register. Run once per cloud
-and compare latency (especially p95) and throughput.
+Ramps virtual users against `/health` and `/users/register`. Run once per
+cloud and compare latency (especially p95) and throughput.
 
 ## End to end
 
-    .\integration-test.ps1 -Target aws
-    .\integration-test.ps1 -Target azure
+    .\integration-test\integration-test.ps1 -Target aws
+    .\integration-test\integration-test.ps1 -Target azure
 
-Full user journey plus the business rules, and checks the records show up
-on the other cloud. Prints PASS/FAIL per check.
+Runs the main user journey (register, login, host an event, book, pay,
+cancel) plus the business rules, and checks the records show up on the other
+cloud. Prints PASS/FAIL per check. It covers the core journey rather than
+every route.
 
 ## Cleaning up afterwards
 
 These create real rows in both databases. Emails are tagged (`rpo-`,
-`load-`, `e2e-`) so they are easy to find. Delete child rows before users
-or the foreign keys block it:
+`load-`, `e2e-`) so they're easy to find. Delete child rows before users or
+the foreign keys block it:
 
     DELETE FROM notifications WHERE recipient_email LIKE 'e2e-%';
     DELETE FROM payments WHERE booking_id IN (SELECT id FROM bookings WHERE attendee_email LIKE 'e2e-%');
@@ -63,5 +67,5 @@ or the foreign keys block it:
     DELETE FROM events WHERE title LIKE 'e2e-%';
     DELETE FROM users WHERE email LIKE 'e2e-%';
 
-Run it on both clouds. The rpo/load scripts only create users, so for those
-the last line on its own is enough.
+Run it on both clouds. The rpo/load scripts only create users, so the last
+line on its own is enough for those.

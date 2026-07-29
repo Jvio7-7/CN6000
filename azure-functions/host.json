@@ -1,4 +1,4 @@
-{
+﻿{
   "version": "2.0",
   "logging": {
     "applicationInsights": {
@@ -15,7 +15,8 @@
   "extensions": {
     "http": {
       "maxConcurrentRequests": 100,
-      "maxOutstandingRequests": 200
+      "maxOutstandingRequests": 200,
+      "routePrefix": ""
     }
   }
 }

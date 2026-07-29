@@ -4,6 +4,12 @@ variable "aws_api_domain" {
   default     = "l30myjhqlk.execute-api.ap-southeast-1.amazonaws.com"
 }
 
+variable "aws_api_target" {
+  description = "AWS API Gateway custom-domain target for the weighted record (health check still hits the raw endpoint above)"
+  type        = string
+  default     = "d-pmekt9ynce.execute-api.ap-southeast-1.amazonaws.com"
+}
+
 variable "azure_function_domain" {
   description = "Azure Function App domain (no https://, no trailing slash)"
   type        = string
@@ -11,9 +17,9 @@ variable "azure_function_domain" {
 }
 
 variable "zone_name" {
-  description = "not a real registered domain, just an id for the hosted zone - see README"
+  description = "Registered domain for the weighted failover records"
   type        = string
-  default     = "cn6000-jin-fyp.com"
+  default     = "gather-up.info"
 }
 
 variable "record_name" {

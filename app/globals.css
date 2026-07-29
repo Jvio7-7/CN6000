@@ -363,6 +363,8 @@ a {
 .field select {
   font-family: var(--font-body);
   font-size: 15px;
+  width: 100%;
+  box-sizing: border-box;
   padding: 12px 14px;
   border: 1px solid var(--border);
   border-radius: 9px;
@@ -370,6 +372,13 @@ a {
   color: var(--ink);
   outline: none;
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+/* Android Chrome sizes date/time inputs to their content instead of filling
+   the field; this pins them to the same full width as the text inputs. */
+.field input[type="date"],
+.field input[type="time"] {
+  min-width: 100%;
 }
 
 /* drop the native dropdown chrome and draw our own little arrow so the

@@ -10,21 +10,6 @@ function todayDateString() {
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
 }
 
-// every clean 5-minute mark in a day (00:00, 00:05, ... 23:55) - a native
-// datetime-local's step attribute counts increments from whatever `min`
-// happens to be, not from clean marks, so e.g. a min of 14:37 offers
-// 14:37/14:42/14:47/... instead of the tidy 14:40/14:45/14:50 wanted here.
-// A plain dropdown sidesteps that entirely.
-function allTimeSlots() {
-  const slots: string[] = [];
-  for (let h = 0; h < 24; h++) {
-    for (let m = 0; m < 60; m += 5) {
-      slots.push(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`);
-    }
-  }
-  return slots;
-}
-
 export default function NewEventPage() {
   const router = useRouter();
   const { user, token, loading: authLoading } = useAuth();
@@ -44,26 +29,22 @@ export default function NewEventPage() {
     }
   }, [authLoading, user, router]);
 
-  // only offer times still ahead of right now when the picked date is
-  // today - any later date offers the full day
-  const availableTimes = useMemo(() => {
-    const all = allTimeSlots();
-    if (date !== minDate) return all;
+  // if the date is today, set the time input's min to now (also re-checked
+  // on submit since browsers don't enforce min on time inputs)
+  const minTime = useMemo(() => {
+    if (date !== minDate) return undefined;
     const now = new Date();
-    const nowMinutes = now.getHours() * 60 + now.getMinutes();
-    return all.filter((t) => {
-      const [hh, mm] = t.split(':').map(Number);
-      return hh * 60 + mm > nowMinutes;
-    });
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${pad(now.getHours())}:${pad(now.getMinutes())}`;
   }, [date, minDate]);
 
-  // if switching back to today makes the previously-picked time invalid,
-  // clear it rather than silently submit a stale value
+  // if switching back to today makes the previously-picked time earlier than
+  // now, clear it rather than silently submit a stale value
   useEffect(() => {
-    if (time && !availableTimes.includes(time)) {
+    if (time && minTime && time < minTime) {
       setTime('');
     }
-  }, [availableTimes, time]);
+  }, [minTime, time]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -81,6 +62,10 @@ export default function NewEventPage() {
       setError('Pick a date and time.');
       return;
     }
+    if (minTime && time < minTime) {
+      setError('Pick a time later than now.');
+      return;
+    }
 
     setLoading(true);
     try {
@@ -88,10 +73,7 @@ export default function NewEventPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({
-          // `date` and `time` are what the user picked in their own local zone.
-          // Build a Date from the local parts and send it as a UTC ISO string,
-          // so the backend (which runs in UTC) compares against the same instant
-          // the user meant rather than misreading the wall-clock time as UTC.
+          // build a Date from the local parts and send as UTC ISO
           title,
           date: new Date(`${date}T${time}:00`).toISOString(),
           location,
@@ -150,22 +132,16 @@ export default function NewEventPage() {
 
           <div className="field">
             <label htmlFor="time">Time</label>
-            <select
+            <input
               id="time"
               required
+              type="time"
+              step={300}
+              min={minTime}
               value={time}
               onChange={(e) => setTime(e.target.value)}
               disabled={!date}
-            >
-              <option value="" disabled>
-                {date ? 'Select a time' : 'Pick a date first'}
-              </option>
-              {availableTimes.map((t) => (
-                <option key={t} value={t}>
-                  {t}
-                </option>
-              ))}
-            </select>
+            />
           </div>
         </div>
 

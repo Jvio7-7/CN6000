@@ -21,7 +21,4 @@ azure-functions/node_modules/
 azure-functions/bin/
 azure-functions/obj/
 
-# evaluation run logs
-rto-log-*.csv
-rpo-log-*.csv
-rpo-verify-*.csv
+

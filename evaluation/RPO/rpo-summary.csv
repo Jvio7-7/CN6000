@@ -1,0 +1,3 @@
+﻿scenario,surviving,down,first_seq,last_seq,raw_loss,post_loss,kill_time,restore_time,reconcile_time
+azure-down,aws,azure,1,17,11,0,23:58:02.858,23:59:08.138,23:59:49.313
+aws-down,azure,aws,1,50,38,0,00:01:59.426,00:03:07.390,00:04:16.032

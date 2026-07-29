@@ -2,13 +2,22 @@
 # (register -> login -> create event -> book -> pay -> cancel) and checks
 # the business rules reject what they should. also checks the records
 # turn up on the other cloud, which is the cross-cloud replication bit.
-# usage: .\integration-test.ps1 -Target aws
+# usage: .\integration-test.ps1            (runs aws then azure)
+#        .\integration-test.ps1 -Target aws
 param(
-    [ValidateSet('aws','azure')] [string]$Target = 'aws'
+    [ValidateSet('aws','azure','both')] [string]$Target = 'both'
 )
 
+# default: run both clouds back to back by calling this same script twice
+if ($Target -eq 'both') {
+    & $PSCommandPath -Target aws
+    Write-Host ""
+    & $PSCommandPath -Target azure
+    return
+}
+
 $awsBase   = "https://l30myjhqlk.execute-api.ap-southeast-1.amazonaws.com"
-$azureBase = "https://eventapp-func-zhw36q.azurewebsites.net/api"
+$azureBase = "https://eventapp-func-zhw36q.azurewebsites.net"
 
 if ($Target -eq 'aws') { $api = $awsBase; $peer = $azureBase; $peerName = 'azure' }
 else                   { $api = $azureBase; $peer = $awsBase;  $peerName = 'aws' }
@@ -83,6 +92,50 @@ Check "login attendee" ($r.status -eq 200) "got $($r.status)"
 $r = Call POST "$api/users/login" @{ email=$hostEmail; password="WrongPass123!" } $null
 Check "wrong password rejected" ($r.status -eq 401) "got $($r.status)"
 
+# --- account (profile, password) ---
+Write-Host "`naccount"
+$r = Call GET "$api/users/me" $null $hostToken
+Check "get own profile" ($r.status -eq 200 -and $r.data.email -eq $hostEmail) "got $($r.status)"
+
+$r = Call GET "$api/users/me" $null $null
+Check "profile needs auth" ($r.status -eq 401) "got $($r.status)"
+
+$r = Call PATCH "$api/users/me" @{ name="Host Renamed" } $hostToken
+Check "update profile name" ($r.status -eq 200) "got $($r.status)"
+
+$r = Call PATCH "$api/users/me" @{ name="" } $hostToken
+Check "empty name rejected" ($r.status -eq 400) "got $($r.status)"
+
+# change password (current -> new), then confirm the new one logs in
+$newPw = "TestPass456!"
+$r = Call POST "$api/users/change-password" @{ currentPassword=$pw; newPassword=$newPw } $hostToken
+Check "change password" ($r.status -eq 200) "got $($r.status)"
+
+$r = Call POST "$api/users/change-password" @{ currentPassword="WrongPass123!"; newPassword=$newPw } $hostToken
+Check "wrong current password rejected" ($r.status -eq 401) "got $($r.status)"
+
+$r = Call POST "$api/users/login" @{ email=$hostEmail; password=$newPw } $null
+Check "login with new password" ($r.status -eq 200) "got $($r.status)"
+if ($r.data.token) { $hostToken = $r.data.token }
+
+# forgot -> reset via security answer, then confirm reset password logs in
+$r = Call POST "$api/users/forgot-password" @{ email=$hostEmail } $null
+Check "forgot returns question" ($r.status -eq 200 -and $r.data.question) "got $($r.status)"
+
+$r = Call POST "$api/users/forgot-password" @{ email="nobody-$tag@test.local" } $null
+Check "forgot unknown email 404" ($r.status -eq 404) "got $($r.status)"
+
+$r = Call POST "$api/users/reset-password" @{ email=$hostEmail; answer="wrong answer"; newPassword="TestPass789!" } $null
+Check "reset wrong answer rejected" ($r.status -eq 400) "got $($r.status)"
+
+$resetPw = "TestPass789!"
+$r = Call POST "$api/users/reset-password" @{ email=$hostEmail; answer="test answer"; newPassword=$resetPw } $null
+Check "reset with correct answer" ($r.status -eq 200) "got $($r.status)"
+
+$r = Call POST "$api/users/login" @{ email=$hostEmail; password=$resetPw } $null
+Check "login after reset" ($r.status -eq 200) "got $($r.status)"
+if ($r.data.token) { $hostToken = $r.data.token }
+
 # --- events ---
 Write-Host "`nevents"
 $future = (Get-Date).AddDays(30).ToString("yyyy-MM-ddTHH:mm:ss")
@@ -105,6 +158,10 @@ Check "create without token rejected" ($r.status -eq 401) "got $($r.status)"
 $r = Call GET "$api/events" $null $null
 $found = $r.data | Where-Object { $_.id -eq $eventId }
 Check "event appears in list" ($null -ne $found) "not in list"
+
+$r = Call GET "$api/users/me/events" $null $hostToken
+$mine = $r.data | Where-Object { $_.id -eq $eventId }
+Check "event appears in my events" ($r.status -eq 200 -and $null -ne $mine) "got $($r.status)"
 
 # --- bookings ---
 Write-Host "`nbookings"
@@ -160,6 +217,13 @@ Check "booking replicated" ($null -ne $b) "not found on $peerName"
 
 # --- cancel + notification ---
 Write-Host "`ncancel"
+# attendee cancels their own booking (soft delete)
+$r = Call POST "$api/bookings/$bookingId/cancel" $null $attToken
+Check "attendee cancels booking" ($r.status -eq 200) "got $($r.status)"
+
+$r = Call POST "$api/bookings/$bookingId/cancel" $null $null
+Check "booking cancel needs auth" ($r.status -eq 401) "got $($r.status)"
+
 $r = Call POST "$api/events/$eventId/cancel" $null $hostToken
 Check "host cancels event" ($r.status -eq 200) "got $($r.status)"
 
@@ -170,6 +234,35 @@ Check "cancelled event hidden from list" ($null -eq $stillThere) "still listed"
 Start-Sleep -Seconds 2
 $r = Call GET "$api/notifications" $null $attToken
 Check "attendee got refund notification" ($r.data.Count -gt 0) "no notifications"
+
+# --- delete account ---
+# uses a throwaway user so it doesn't disturb the accounts above
+Write-Host "`ndelete account"
+$delEmail = "$tag-delete@test.local"
+$r = Call POST "$api/users/register" @{ name="Delete $tag"; email=$delEmail; password=$pw; securityQuestion="q"; securityAnswer="test answer" } $null
+$r = Call POST "$api/users/login" @{ email=$delEmail; password=$pw } $null
+$delToken = $r.data.token
+
+$r = Call DELETE "$api/users/me" $null $delToken
+Check "delete own account" ($r.status -eq 200) "got $($r.status)"
+
+$r = Call POST "$api/users/login" @{ email=$delEmail; password=$pw } $null
+Check "deleted account cannot log in" ($r.status -eq 401) "got $($r.status)"
+
+# --- cleanup ---
+# The "Tiny" event is deliberately left full by the capacity checks above, so
+# without this it stays visible on the events page after the run. Cancelling
+# it here is a housekeeping step, not a scored check, so the pass count stays
+# comparable between runs. The cancellation replicates to the peer cloud on
+# its own, so one call clears it from both.
+if ($tinyId) {
+    $c = Call POST "$api/events/$tinyId/cancel" $null $hostToken
+    if ($c.status -eq 200) {
+        Write-Host "`ncleanup: cancelled leftover '$tag Tiny' event"
+    } else {
+        Write-Host "`ncleanup: could not cancel '$tag Tiny' (status $($c.status)) - cancel it manually" -ForegroundColor Yellow
+    }
+}
 
 $runId   = Get-Date -Format "MMddHHmmss"
 $outFile = "integration-test-$Target-$runId.csv"

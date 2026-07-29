@@ -16,15 +16,15 @@ provider "aws" {
   region = "us-east-1"
 }
 
-# no real domain bought for this - zone isn't publicly delegated,
-# tested by querying the name servers directly instead
+# Public hosted zone for the registered domain; the registrar delegates
+# to these name servers
 
 resource "aws_route53_zone" "main" {
   name = var.zone_name
 }
 
-# these hit the real /health endpoints, which run a SELECT 1 against
-# the db, so it's a genuine health check not just "is the function warm"
+# /health runs a SELECT 1 against the db, so it checks the db too, not
+# just whether the function responds
 
 resource "aws_route53_health_check" "aws_endpoint" {
   fqdn              = var.aws_api_domain
@@ -43,7 +43,7 @@ resource "aws_route53_health_check" "azure_endpoint" {
   fqdn              = var.azure_function_domain
   port              = 443
   type              = "HTTPS"
-  resource_path     = "/api/health"
+  resource_path     = "/health"
   failure_threshold = 3
   request_interval  = 30
 
@@ -60,7 +60,7 @@ resource "aws_route53_record" "api_aws" {
   name           = var.record_name
   type           = "CNAME"
   ttl            = 30
-  records        = [var.aws_api_domain]
+  records        = [var.aws_api_target]
   set_identifier = "aws"
 
   weighted_routing_policy {

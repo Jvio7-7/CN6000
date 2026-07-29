@@ -1,29 +1,10 @@
-# ---------------------------------------------------------------------------
-# Azure-side automatic reconciliation on AWS recovery (Option B2).
+# Azure-side auto-reconcile, mirroring the AWS CloudWatch alarm. An App
+# Insights availability test pings AWS /health; when AWS recovers, a metric
+# alert fires an action-group webhook to the recovery-reconcile function,
+# which pushes Azure's rows back to AWS.
 #
-# This is the mirror of the AWS CloudWatch alarm. Here Azure independently
-# monitors the AWS endpoint using native Azure tooling and, when AWS recovers,
-# reconciles Azure's rows back to AWS. With both halves in place, either cloud
-# failing and returning now triggers an automatic resync in the right
-# direction, orchestrated by the surviving cloud.
-#
-# Chain:
-#   Application Insights availability test pings the AWS /health endpoint
-#     -> metric alert fires on the availability metric
-#       -> action group webhook
-#         -> the dedicated recovery-reconcile function on Azure
-#           -> reconcileToPeer() pushes Azure rows to AWS
-#
-# Caveats (documented deliberately, not hidden):
-# - Standard availability tests run at a 5-minute minimum frequency, so Azure
-#   detects AWS recovery more slowly than AWS detects Azure recovery (30s
-#   Route 53 checks). The two directions are symmetric in existence but not in
-#   reaction time. This is a limitation of the platform tooling, not the design.
-# - Some Azure for Students subscriptions restrict availability web tests. If
-#   this stack fails to provision here, the timer-based alternative (a
-#   scheduled function polling AWS /health) achieves the same outcome without
-#   Application Insights.
-# ---------------------------------------------------------------------------
+# Note: Standard availability tests only run every 5 min, so Azure notices
+# AWS recovery slower than AWS notices Azure's (Route 53 checks every 30s).
 
 # Secret guarding the recovery endpoint. Azure Monitor webhooks cannot send a
 # custom header, so the secret travels in the query string instead.
@@ -48,7 +29,7 @@ resource "azurerm_application_insights_standard_web_test" "aws_health" {
   resource_group_name     = azurerm_resource_group.main.name
   location                = azurerm_resource_group.main.location
   application_insights_id = azurerm_application_insights.monitor.id
-  geo_locations           = ["apac-sg-sin-edge"]
+  geo_locations           = ["apac-hk-hkn-azr", "apac-jp-kaw-edge"]
   frequency               = 300
   timeout                 = 30
   enabled                 = true

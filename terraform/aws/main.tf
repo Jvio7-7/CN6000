@@ -675,9 +675,8 @@ resource "aws_apigatewayv2_stage" "default" {
     throttling_burst_limit = 6
   }
 
-  # Registration is deliberately looser than the other credential routes: it
-  # is the write path the load tests drive, so the limit sits well above the
-  # measured throughput and does not distort those results.
+  # register has a higher limit than the other auth routes since the load
+  # test hits it hardest and shouldn't be throttled during measurement
   route_settings {
     route_key              = "POST /users/register"
     throttling_rate_limit  = 25

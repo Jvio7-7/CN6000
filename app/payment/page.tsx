@@ -4,10 +4,40 @@ import { Suspense, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { API_BASE_URL } from '@/lib/auth-context';
 
-// groups digits into 4s as you type: "4242424242424242" -> "4242 4242 4242 4242"
-function formatCardNumber(raw: string) {
-  const digits = raw.replace(/\D/g, '').slice(0, 16);
-  return digits.match(/.{1,4}/g)?.join(' ') || digits;
+const BULLET = '\u2022';
+
+// Amex (starts 34/37) is 15 digits with a 4-digit code; others are 16/3
+function isAmex(digits: string) {
+  return /^3[47]/.test(digits);
+}
+function cardMaxLen(digits: string) {
+  return isAmex(digits) ? 15 : 16;
+}
+function cvcLen(digits: string) {
+  return isAmex(digits) ? 4 : 3;
+}
+
+// mask the middle 8 digits (positions 5-12), grouped in 4s
+function maskCardDisplay(digits: string) {
+  const shown = digits
+    .split('')
+    .map((d, i) => (i >= 4 && i < 12 ? BULLET : d))
+    .join('');
+  return shown.match(/.{1,4}/g)?.join(' ') || shown;
+}
+
+// rebuild the real digits: keep visible digits, and where a bullet sits pull
+// the original digit back from the previous value by position
+function unmaskCard(shown: string, prev: string) {
+  const chars = shown.replace(/ /g, '').split('');
+  let real = '';
+  for (const c of chars) {
+    if (real.length >= 16) break;
+    if (c === BULLET) real += prev[real.length] ?? '';
+    else if (/\d/.test(c)) real += c;
+  }
+  // cap to this card's length (15 for Amex, else 16)
+  return real.slice(0, cardMaxLen(real));
 }
 
 function formatExpiry(raw: string) {
@@ -41,6 +71,10 @@ function PaymentForm() {
       setError('No booking found - head back and book a spot first.');
       return;
     }
+    if (cardNumber.length < cardMaxLen(cardNumber)) {
+      setError(isAmex(cardNumber) ? 'An Amex card number is 15 digits.' : 'A card number is 16 digits.');
+      return;
+    }
     if (!/^\d{2}\/\d{2}$/.test(expiry)) {
       setError('Expiry should be in MM/YY format.');
       return;
@@ -55,8 +89,9 @@ function PaymentForm() {
       setError('That card has expired.');
       return;
     }
-    if (!/^\d{3,4}$/.test(cvv)) {
-      setError('Security code should be 3 or 4 digits.');
+    const wantCvc = cvcLen(cardNumber);
+    if (cvv.length !== wantCvc) {
+      setError(`Security code should be ${wantCvc} digits.`);
       return;
     }
 
@@ -115,8 +150,13 @@ function PaymentForm() {
             id="cardNumber"
             required
             inputMode="numeric"
-            value={cardNumber}
-            onChange={(e) => setCardNumber(formatCardNumber(e.target.value))}
+            autoComplete="off"
+            value={maskCardDisplay(cardNumber)}
+            onChange={(e) => {
+              const next = unmaskCard(e.target.value, cardNumber);
+              setCardNumber(next);
+              setCvv((c) => c.slice(0, cvcLen(next)));
+            }}
             placeholder="4242 4242 4242 4242"
           />
           <span className="fieldHint">Any number works - one ending in 0000 will be declined, for testing.</span>
@@ -141,11 +181,13 @@ function PaymentForm() {
             <input
               id="cvv"
               required
+              type="password"
               inputMode="numeric"
+              autoComplete="off"
               value={cvv}
-              onChange={(e) => setCvv(e.target.value.replace(/\D/g, '').slice(0, 4))}
-              placeholder="123"
-              maxLength={4}
+              onChange={(e) => setCvv(e.target.value.replace(/\D/g, '').slice(0, cvcLen(cardNumber)))}
+              placeholder={BULLET.repeat(cvcLen(cardNumber))}
+              maxLength={cvcLen(cardNumber)}
             />
           </div>
         </div>

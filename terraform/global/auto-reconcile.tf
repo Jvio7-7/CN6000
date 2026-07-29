@@ -1,24 +1,7 @@
-# ---------------------------------------------------------------------------
-# Automatic reconciliation on peer recovery.
-#
-# When the Azure health check recovers (transitions back to healthy), the
-# surviving AWS cloud may hold writes that never replicated during the outage.
-# This wiring reconciles automatically at that moment, rather than on a timer:
-#
-#   Azure health check recovers
-#     -> CloudWatch alarm (us-east-1) goes ALARM -> OK
-#       -> SNS topic
-#         -> trigger Lambda (us-east-1)
-#           -> HTTPS POST to the AWS reconcile endpoint (pushes AWS rows to Azure)
-#
-# Design notes:
-# - Triggering only on the AZURE health check recovering, and calling the AWS
-#   reconcile endpoint, fixes the direction: the survivor refills the returnee.
-# - The alarm requires several consecutive healthy datapoints before firing,
-#   which absorbs brief flapping so reconcile does not run repeatedly.
-# - The trigger Lambda calls the existing public reconcile endpoint over HTTPS,
-#   so it needs no VPC access and reuses the shared-secret auth already in place.
-# ---------------------------------------------------------------------------
+# Auto-reconcile when Azure recovers. Route 53 health check for Azure goes
+# ALARM while it's down and OK when it recovers; the OK transition triggers
+# a Lambda (via SNS) that calls the AWS reconcile endpoint, so AWS pushes any
+# writes Azure missed while it was down.
 
 # --- IAM role for the trigger Lambda ---
 resource "aws_iam_role" "reconcile_trigger" {
@@ -47,16 +30,9 @@ data "archive_file" "reconcile_trigger" {
   source {
     filename = "index.js"
     content  = <<-JS
-      // Invoked by SNS when the Azure health check recovers. Calls the AWS
-      // reconcile endpoint so AWS pushes any writes Azure missed while it was
-      // down. Reuses the shared replication secret for auth.
-      //
-      // A recovered health check means Azure can answer /health (a SELECT 1),
-      // but its Functions worker may not yet be warm enough to accept the
-      // /replicate/* writes. So the first reconcile can report failures. This
-      // handler retries on any reported failure, backing off between attempts,
-      // until the sync completes cleanly or the attempts are exhausted. This
-      // self-corrects regardless of how long Azure takes to become write-ready.
+      // Called by SNS when Azure recovers. Hits the AWS reconcile endpoint.
+      // Azure may answer /health before it can accept writes, so retry with
+      // a backoff until the sync reports no failures.
       const https = require('https');
 
       const MAX_ATTEMPTS = 4;
@@ -158,10 +134,8 @@ resource "aws_lambda_permission" "allow_sns" {
 }
 
 # --- CloudWatch alarm on the Azure health check ---
-# HealthCheckStatus = 1 when healthy, 0 when unhealthy. Alarm goes into ALARM
-# while Azure is down, and back to OK on recovery. We notify on the OK
-# transition, which is the recovery signal. Requiring 3 consecutive healthy
-# periods (3 x 30s) before OK absorbs brief flapping.
+# HealthCheckStatus is 1 when healthy, 0 when down. Notify on the OK
+# transition (recovery); 3 healthy periods are required to avoid flapping.
 resource "aws_cloudwatch_metric_alarm" "azure_down" {
   alarm_name          = "${var.record_name}-azure-endpoint-down"
   namespace           = "AWS/Route53"
