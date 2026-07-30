@@ -205,7 +205,7 @@ sqlcmd -S <sql_server_fqdn> -d eventdb -U eventappadmin -P <password> -i sql\sch
 
 ## DNS and Active/Active routing
 
-The domain `gather-up.info` is registered (through IONOS) and delegated,
+The domain `gather-up.info` is registered and delegated,
 so `www.gather-up.info` (frontend) and `api.gather-up.info` (API) resolve
 publicly.
 
