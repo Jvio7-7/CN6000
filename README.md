@@ -256,9 +256,8 @@ reset means answering it correctly. No external service needed.
 
 Enter your email and the account's security question comes back. Answer
 it correctly and set a new password on the same page. If no account matches
-the email, the page says so directly rather than the usual "if an account
-exists we've sent a link" - clearer to demo, though a production app would
-hide it to avoid revealing which emails are registered.
+the email, the page says so directly - a production app would hide that to
+avoid revealing which emails are registered.
 
 The answer is compared case-insensitively and trimmed, so "Blue" and
 "blue " both match what was set at signup.
@@ -273,8 +272,8 @@ The same check runs on registration, reset, and change.
 ## Accounts: profile edit, password change, and ownership
 
 Logged-in users can change their name and password from the account
-page (password change requires the current password, unlike the
-code-based reset flow above). Hosting an event or booking a slot
+page (changing a password needs the current one, unlike the
+security-question reset above). Hosting an event or booking a slot
 requires being logged in, since "your events" and "your bookings" are
 tied to the authenticated user.
 
