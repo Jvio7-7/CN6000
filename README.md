@@ -256,8 +256,7 @@ reset means answering it correctly. No external service needed.
 
 Enter your email and the account's security question comes back. Answer
 it correctly and set a new password on the same page. If no account matches
-the email, the page says so directly - a production app would hide that to
-avoid revealing which emails are registered.
+the email, the page says so directly.
 
 The answer is compared case-insensitively and trimmed, so "Blue" and
 "blue " both match what was set at signup.
