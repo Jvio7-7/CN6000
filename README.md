@@ -14,6 +14,39 @@ Stack:
 
 Repo: github.com/Jvio7-7/CN6000
 
+## From scratch (deploy order)
+
+The full path from a fresh clone to a live deployment. Each step has more
+detail in its own section below.
+
+```powershell
+# 1. install dependencies
+npm install
+cd azure-functions; npm install; cd ..
+
+# 2. copy the .example templates and fill in real values
+#    .env.example -> .env.local
+#    terraform.tfvars.example -> terraform.tfvars  (in aws / azure / frontend-azure)
+#    jwt_secret must be the SAME value in aws and azure
+
+# 3. deploy the backends (build-lambda.ps1 zips the AWS functions;
+#    Azure functions publish with `func azure functionapp publish`)
+cd terraform\aws;   terraform init; terraform apply    # then .\build-lambda.ps1, apply again
+cd ..\azure;        terraform init; terraform apply
+# apply the SQL schema to each database (see AWS/Azure sections)
+
+# 4. deploy the frontends and DNS
+cd ..\frontend-aws;   terraform init; terraform apply
+cd ..\frontend-azure; terraform init; terraform apply
+cd ..\global;         terraform init; terraform apply
+.\deploy-frontend-aws.ps1 -BucketName <bucket> -DistributionId <dist>
+.\deploy-frontend-azure.ps1 -StorageAccountName <account>
+```
+
+The two backends each need the other's API URL (set in `terraform.tfvars`),
+so the first apply of each uses a placeholder and gets updated once both are
+up - the per-section steps below cover this.
+
 ## Local dev
 
 The frontend has no backend of its own - it calls whichever cloud you
@@ -187,10 +220,10 @@ endpoints, and weighted DNS (50/50) between AWS and Azure.
 
 To avoid Route 53 itself being a single point of failure, DNS is served by
 two providers at once: Route 53 and Azure DNS, with the registrar
-delegating to name servers from both. Azure DNS (`terraform\azure-dns`)
-mirrors the zone, and a Traffic Manager profile (`terraform\traffic-manager`)
-does the weighted 50/50 on the Azure side. Both planes are compared in the
-RTO measurement.
+delegating to name servers from both. An Azure DNS zone mirrors the records
+and a Traffic Manager profile does the weighted 50/50 on the Azure side;
+both live in the `frontend-azure` stack (`terraform\frontend-azure\dns.tf`).
+Both planes are compared in the RTO measurement.
 
 Azure DNS keeps its four system name servers on the zone apex and won't let
 them be removed, so the apex NS set isn't a clean 2+2 split - harmless here

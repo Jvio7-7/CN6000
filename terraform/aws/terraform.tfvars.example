@@ -1,9 +1,8 @@
-# Template for terraform.tfvars. Copy this file to terraform.tfvars and
-# replace the placeholders with real values.
+# Copy to terraform.tfvars and replace the placeholders with real values.
 
-db_password    = "ChangeMe123!"
-azure_base_url = "https://eventapp-func-zhw36q.azurewebsites.net/api"
+db_password    = "your-db-password"
+azure_base_url = "https://your-azure-function-app.azurewebsites.net/api"
 
-# MUST be the exact same value in terraform/azure/terraform.tfvars too -
-# generate one with: python3 -c "import secrets; print(secrets.token_hex(32))"
-jwt_secret = "GENERATE-YOUR-OWN-64-CHAR-HEX-STRING-AND-USE-SAME-VALUE-IN-BOTH-CLOUDS"
+# Must be the exact same value in terraform/azure/terraform.tfvars too.
+# Generate one with: python3 -c "import secrets; print(secrets.token_hex(32))"
+jwt_secret = "your-64-char-hex-secret-same-on-both-clouds"

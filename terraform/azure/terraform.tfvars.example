@@ -1,10 +1,9 @@
-# Template for terraform.tfvars. Copy this file to terraform.tfvars and
-# replace the placeholders with real values.
+# Copy to terraform.tfvars and replace the placeholders with real values.
 
-subscription_id    = "ae8484e4-7dc1-4251-9244-d1660c189811"
-sql_admin_password = "ChangeMe123!"
-aws_base_url        = "https://l30myjhqlk.execute-api.ap-southeast-1.amazonaws.com"
+subscription_id    = "your-azure-subscription-id"
+sql_admin_password = "your-sql-admin-password"
+aws_base_url       = "https://your-aws-api-id.execute-api.your-region.amazonaws.com"
 
-# MUST be the exact same value as terraform/aws/terraform.tfvars - this is
+# Must be the exact same value as terraform/aws/terraform.tfvars - this is
 # what lets a token issued by one cloud validate on the other.
-jwt_secret = "GENERATE-YOUR-OWN-64-CHAR-HEX-STRING-AND-USE-SAME-VALUE-IN-BOTH-CLOUDS"
+jwt_secret = "your-64-char-hex-secret-same-on-both-clouds"
