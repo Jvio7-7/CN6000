@@ -1,3 +1,3 @@
-# Copy to terraform.tfvars and replace the placeholder with your real value.
+# Copy to terraform.tfvars and fill in your real value.
 
 subscription_id = "your-azure-subscription-id"

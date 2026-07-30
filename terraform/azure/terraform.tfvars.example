@@ -1,9 +1,16 @@
-# Copy to terraform.tfvars and replace the placeholders with real values.
+# Copy to terraform.tfvars and fill in real values.
 
-subscription_id    = "your-azure-subscription-id"
-sql_admin_password = "your-sql-admin-password"
-aws_base_url       = "https://your-aws-api-id.execute-api.your-region.amazonaws.com"
+subscription_id     = "your-azure-subscription-id"
+sql_admin_password  = "your-sql-admin-password"
+azure_region = "southeastasia"
+aws_base_url = "https://your-api-id.execute-api.your-region.amazonaws.com"
 
-# Must be the exact same value as terraform/aws/terraform.tfvars - this is
-# what lets a token issued by one cloud validate on the other.
-jwt_secret = "your-64-char-hex-secret-same-on-both-clouds"
+# must match the aws stack exactly - a token issued by one cloud is
+# validated by the other
+jwt_secret = "same-64-char-hex-value-as-the-aws-stack"
+
+# shared with the aws stack - guards the /replicate/* endpoints
+replication_secret = "your-64-char-hex-secret"
+
+# separate secret for the recovery-reconcile webhook
+recovery_secret = "your-64-char-hex-secret"

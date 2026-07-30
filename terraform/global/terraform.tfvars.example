@@ -1,0 +1,5 @@
+# Copy to terraform.tfvars and fill in your real value.
+# Same value as the aws and azure stacks - the auto-reconcile Lambda uses it
+# to call the reconcile endpoint.
+
+replication_secret = "your-64-char-hex-secret"

@@ -1,8 +1,8 @@
-# Copy to terraform.tfvars and replace the placeholders with real values.
+# Copy to terraform.tfvars and fill in real values.
 
-db_password    = "your-db-password"
-azure_base_url = "https://your-azure-function-app.azurewebsites.net/api"
+db_password    = "your-rds-password"
+azure_base_url = "https://your-function-app.azurewebsites.net"
+jwt_secret     = "same-64-char-hex-value-as-the-azure-stack"
 
-# Must be the exact same value in terraform/azure/terraform.tfvars too.
-# Generate one with: python3 -c "import secrets; print(secrets.token_hex(32))"
-jwt_secret = "your-64-char-hex-secret-same-on-both-clouds"
+# shared with the azure stack - guards the /replicate/* endpoints
+replication_secret = "your-64-char-hex-secret"

@@ -6,6 +6,10 @@
     "DB_SERVER": "your-azure-sql-server.database.windows.net",
     "DB_NAME": "eventdb",
     "DB_USER": "your-admin-username",
-    "DB_PASSWORD": "your-admin-password"
+    "DB_PASSWORD": "your-admin-password",
+    "JWT_SECRET": "same-64-char-hex-value-as-the-aws-side",
+    "REPLICATION_SECRET": "your-64-char-hex-secret",
+    "RECOVERY_SECRET": "your-64-char-hex-secret",
+    "AWS_BASE_URL": "https://your-api-id.execute-api.your-region.amazonaws.com"
   }
 }
