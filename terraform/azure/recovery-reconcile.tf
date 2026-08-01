@@ -46,7 +46,8 @@ resource "azurerm_application_insights_standard_web_test" "aws_health" {
 }
 
 # Action group with a webhook to the recovery-reconcile function. The secret is
-# in the query string because webhooks cannot set custom headers.
+# in the query string because webhooks cannot set custom headers. No /api in
+# the path - host.json sets routePrefix to empty.
 resource "azurerm_monitor_action_group" "recovery" {
   name                = "${var.project_name}-recovery-ag"
   resource_group_name = azurerm_resource_group.main.name
@@ -54,7 +55,7 @@ resource "azurerm_monitor_action_group" "recovery" {
 
   webhook_receiver {
     name        = "recovery-reconcile"
-    service_uri = "https://${azurerm_linux_function_app.main.default_hostname}/api/internal/recovery-reconcile?key=${var.recovery_secret}"
+    service_uri = "https://${azurerm_linux_function_app.main.default_hostname}/internal/recovery-reconcile?key=${var.recovery_secret}"
   }
 }
 

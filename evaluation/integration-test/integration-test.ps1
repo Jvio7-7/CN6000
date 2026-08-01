@@ -92,6 +92,43 @@ Check "login attendee" ($r.status -eq 200) "got $($r.status)"
 $r = Call POST "$api/users/login" @{ email=$hostEmail; password="WrongPass123!" } $null
 Check "wrong password rejected" ($r.status -eq 401) "got $($r.status)"
 
+# --- input validation ---
+# these exercise the rejection branches in register, which the happy path
+# above never reaches
+Write-Host "`ninput validation"
+$vEmail = "$tag-validation@test.local"
+$vBase  = @{ name="Validation $tag"; email=$vEmail; securityQuestion="q"; securityAnswer="test answer" }
+
+$r = Call POST "$api/users/register" ($vBase + @{ password="Short1!" }) $null
+Check "short password rejected" ($r.status -eq 400) "got $($r.status)"
+
+$r = Call POST "$api/users/register" ($vBase + @{ password="alllowercase1!" }) $null
+Check "password without uppercase rejected" ($r.status -eq 400) "got $($r.status)"
+
+$r = Call POST "$api/users/register" ($vBase + @{ password="NoSpecialChar123" }) $null
+Check "password without symbol rejected" ($r.status -eq 400) "got $($r.status)"
+
+$r = Call POST "$api/users/register" ($vBase + @{ password="ALLUPPERCASE1!" }) $null
+Check "password without lowercase rejected" ($r.status -eq 400) "got $($r.status)"
+
+$r = Call POST "$api/users/register" ($vBase + @{ password="NoDigitsHere!!" }) $null
+Check "password without number rejected" ($r.status -eq 400) "got $($r.status)"
+
+$r = Call POST "$api/users/register" ($vBase + @{ password="WayTooLongPassword123!!!!" }) $null
+Check "over-long password rejected" ($r.status -eq 400) "got $($r.status)"
+
+$r = Call POST "$api/users/register" @{ name="V"; email=$vEmail; password=$pw; securityQuestion="q"; securityAnswer="a" } $null
+Check "short security answer rejected" ($r.status -eq 400) "got $($r.status)"
+
+$r = Call POST "$api/users/register" @{ name="V"; email=$vEmail; password=$pw } $null
+Check "missing fields rejected" ($r.status -eq 400) "got $($r.status)"
+
+$r = Call POST "$api/users/register" @{ name="Dup $tag"; email=$hostEmail; password=$pw; securityQuestion="q"; securityAnswer="test answer" } $null
+Check "duplicate email rejected" ($r.status -eq 409) "got $($r.status)"
+
+$r = Call GET "$api/users/me" $null "not-a-real-token"
+Check "invalid token rejected" ($r.status -eq 401) "got $($r.status)"
+
 # --- account (profile, password) ---
 Write-Host "`naccount"
 $r = Call GET "$api/users/me" $null $hostToken
@@ -234,6 +271,24 @@ Check "cancelled event hidden from list" ($null -eq $stillThere) "still listed"
 Start-Sleep -Seconds 2
 $r = Call GET "$api/notifications" $null $attToken
 Check "attendee got refund notification" ($r.data.Count -gt 0) "no notifications"
+
+# --- internal endpoints ---
+# these are only ever called by the other cloud or by Azure Monitor, so the
+# test checks the route exists and the shared secret guards it. a missing key
+# has to come back 401. a 404 here would mean the route path is wrong, which
+# is how a broken webhook URL would show up.
+Write-Host "`ninternal endpoints"
+foreach ($ep in @("replicate/users", "replicate/events", "replicate/bookings", "replicate/payments", "replicate/reconcile")) {
+    $r = Call POST "$api/$ep" @{ probe = $true } $null
+    Check "$ep guarded" ($r.status -eq 401) "got $($r.status)"
+}
+
+# recovery-reconcile only exists on Azure. On AWS the same job is done by a
+# Lambda that SNS invokes, so there's no HTTP route to check.
+if ($Target -eq 'azure') {
+    $r = Call POST "$api/internal/recovery-reconcile?key=wrong-key" $null $null
+    Check "recovery-reconcile guarded" ($r.status -eq 401) "got $($r.status)"
+}
 
 # --- delete account ---
 # uses a throwaway user so it doesn't disturb the accounts above
