@@ -42,11 +42,9 @@ function validatePassword(password) {
   return null;
 }
 
-// Shared-secret check for the internal replication endpoints. Azure Functions
-// v4 exposes headers as a Headers object, hence .get() rather than indexing.
-// Constant-time secret comparison. Hashing both sides first gives them a
-// fixed length, so timingSafeEqual never throws on a length mismatch, and
-// the comparison does not leak how many leading characters matched.
+// Guards the internal /replicate/* endpoints. Azure Functions v4 exposes
+// headers as a Headers object, hence .get(). Hashing both sides first fixes
+// their length, so timingSafeEqual can't throw and the timing gives nothing away.
 function secretsMatch(supplied, expected) {
   if (typeof supplied !== 'string' || typeof expected !== 'string') return false;
   const a = crypto.createHash('sha256').update(supplied).digest();

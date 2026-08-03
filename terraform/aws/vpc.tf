@@ -1,13 +1,7 @@
-# ---------------------------------------------------------------------------
-# Network isolation for RDS.
-#
-# The database runs in private subnets and is not publicly accessible; it is
-# reachable only from the application's own Lambda functions, which run inside
-# the same VPC. The database is never exposed to the internet on 5432.
-#
-# Because VPC-attached Lambdas have no default internet access, a NAT gateway
-# provides their outbound path to the Azure peer for cross-cloud replication.
-# ---------------------------------------------------------------------------
+# Network isolation for RDS. The database sits in private subnets and is only
+# reachable from the Lambdas in the same VPC, never from the internet.
+# VPC-attached Lambdas have no outbound route by default, so a NAT gateway
+# gives them one for replication to Azure.
 
 data "aws_availability_zones" "available" {
   state = "available"

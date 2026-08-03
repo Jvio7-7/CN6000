@@ -1,15 +1,12 @@
 const { Pool } = require('pg');
 const crypto = require('crypto');
 
-// thrown for things like "event is full" or "already booked" - handlers
-// catch this specifically and respond 400/409, not the generic 500 they
-// give everything else
+// user-fixable errors like "event is full" - handlers turn these into
+// 400/409 instead of a 500
 class ValidationError extends Error {}
 
 // AWS side. Every write: generate a UUID, write to RDS, replicate to Azure.
-// awaited, not fire-and-forget - Lambda kills any async work still running
-// after the handler returns, so a background fetch just never finishes.
-// found this out the hard way when replication silently did nothing.
+// Replication is awaited - Lambda freezes once the handler returns.
 
 let pool;
 
@@ -51,9 +48,8 @@ async function replicateToAzure(path, payload) {
   }
 }
 
-// Events - now owned by the user who created them (userId required),
-// with a soft-delete (cancelled_at) instead of a hard DELETE, since
-// bookings/payments reference the event by foreign key.
+// Events are owned by their creator and soft-deleted (cancelled_at),
+// since bookings and payments reference them by foreign key.
 
 async function createEvent({ userId, title, date, location, capacity, price }) {
   if (new Date(date) <= new Date()) {
@@ -79,9 +75,8 @@ async function createEvent({ userId, title, date, location, capacity, price }) {
   return record;
 }
 
-// booking_count is a live count of non-cancelled bookings, not a stored
-// column - simpler than keeping a counter in sync, and this list is
-// never large enough for the subquery to matter
+// booking_count is counted live rather than stored, so there's no
+// counter to keep in sync
 async function listEvents() {
   const db = getPool();
   const result = await db.query(
@@ -106,11 +101,9 @@ async function listMyEvents(userId) {
   return result.rows;
 }
 
-// Returns null if the event doesn't exist or isn't owned by this user -
-// caller turns that into a 404, not a 500. Cascades: every active
-// booking against this event gets cancelled too, and anyone with a
-// completed payment gets a (simulated) refund notification - there's no
-// real payment processor, so this is exactly what "refund" means here.
+// Returns null if the event doesn't exist or isn't this user's, so the
+// caller can send a 404. Cancels every active booking too, and writes a
+// refund notification for anyone who had paid.
 async function cancelEvent(eventId, userId) {
   const db = getPool();
   const result = await db.query(
@@ -192,13 +185,9 @@ async function replicateEvent(record) {
 
 // Bookings - same ownership + soft-delete pattern as events
 
-// The capacity check and the insert run inside one transaction, with the
-// event row locked (SELECT ... FOR UPDATE). Without the lock, two concurrent
-// bookings could both read the same seat count, both decide there is room,
-// and both insert - taking the event over capacity. The lock serialises
-// bookings for a given event so the count a request reads is still true when
-// it inserts. Replication and the notification happen after the commit, so a
-// slow network call never holds the row lock.
+// The capacity check and the insert share one transaction with the event
+// row locked, so two concurrent bookings can't both claim the last seat.
+// Replication runs after the commit, never while holding the lock.
 async function createBooking({ userId, eventId, attendeeName, attendeeEmail }) {
   const db = getPool();
   const client = await db.connect();
@@ -284,9 +273,8 @@ async function listMyBookings(userId) {
   return result.rows;
 }
 
-// shared core used both by the participant's own cancel request (which
-// checks ownership) and by cancelEvent's cascade (which doesn't - the
-// event owner is cancelling on their behalf)
+// shared by the attendee's own cancel (checks ownership) and by
+// cancelEvent's cascade (doesn't - the host is cancelling for them)
 async function cancelBookingInternal(bookingId, userId = null) {
   const db = getPool();
   const conditions = userId ? 'id = $1 AND user_id = $2 AND cancelled_at IS NULL' : 'id = $1 AND cancelled_at IS NULL';
@@ -358,9 +346,7 @@ async function replicateBooking(record) {
 
 // Users - registration, profile edit, password change/reset
 
-// no email verification anymore - see README for why (SES sandbox mode
-// needs a domain we don't have to ever get past). Account is usable
-// immediately, same as before that was ever added.
+// no email verification - see README. The account works immediately.
 async function createUser({ name, email, passwordHash, securityQuestion, securityAnswerHash }) {
   const id = crypto.randomUUID();
   const db = getPool();
@@ -422,16 +408,11 @@ async function updateProfile(userId, { name }) {
   return safe;
 }
 
-// GDPR-style account deletion. In a multi-cloud active-active system a plain
-// hard DELETE is unsafe: reconcile re-pushes local rows to the peer, so a row
-// deleted on one cloud but still present on the other would be resurrected on
-// the next recovery. Instead this is a tombstone with anonymisation:
-//   - personally identifiable fields are actually overwritten (right to erasure)
-//   - deleted_at is set as the tombstone, so reconcile converges on the deleted
-//     state rather than restoring the account
-//   - the id is kept so events/bookings foreign keys stay intact
-// The user's own events are cancelled (which refunds their attendees via the
-// existing cancelEvent path) and the user's own bookings are cancelled too.
+// GDPR-style deletion. A hard DELETE is unsafe here: reconcile would push
+// the row back from the peer on the next recovery. So this overwrites the
+// personal fields, sets deleted_at as a tombstone both clouds converge on,
+// and keeps the id so foreign keys stay intact. The user's events and
+// bookings are cancelled through the normal cancel paths.
 async function deleteAccount(userId) {
   const db = getPool();
 
@@ -531,19 +512,16 @@ async function replicateUser(record) {
   );
 }
 
-// Returns null if no account exists for this email - the handler turns
-// that into an explicit "no account found" response (same deliberate
-// existence-disclosure decision as before, just without an email step
-// in between now). Never returns the answer itself, only the question.
+// Returns null if there's no account for this email. Returns the question
+// only, never the answer.
 async function getSecurityQuestion(email) {
   const user = await findUserByEmail(email);
   if (!user) return null;
   return user.security_question;
 }
 
-// answerMatches is computed by the caller (auth.js's verifyPassword,
-// reused here since bcrypt.compare works the same way regardless of
-// what's being compared) - db.js just does the lookup and the write
+// the caller checks the answer with auth.js's verifyPassword; db.js just
+// does the lookup and the write
 async function resetPasswordWithAnswer({ email, newPasswordHash }) {
   const db = getPool();
   const user = await findUserByEmail(email);
@@ -639,15 +617,12 @@ async function listNotifications() {
   return result.rows;
 }
 
-// resync after a cloud has been down. the normal replicate is best-effort
-// so writes made while the peer was down never got there. this just reads
-// everything and sends it again. the /replicate/* endpoints upsert so
-// re-sending rows that already exist doesn't matter, only the missing ones
-// get added. run it on both clouds after one comes back.
+// resync after a cloud has been down. normal replication is best-effort, so
+// writes made while the peer was unreachable never arrived. this resends
+// everything; /replicate/* upserts, so only the missing rows get added.
 
-// separate push with a 10s timeout (the normal one aborts at 3s) so a
-// re-sync of many rows doesn't get cut off. returns true/false so we can
-// count how many actually went through.
+// 10s timeout here rather than the usual 3s, so a large resync isn't cut
+// off partway. returns true/false so the caller can count successes.
 async function pushToPeer(path, payload) {
   if (!AZURE_BASE_URL) return false;
   try {

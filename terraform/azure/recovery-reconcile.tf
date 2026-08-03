@@ -1,10 +1,7 @@
-# Azure-side auto-reconcile, mirroring the AWS CloudWatch alarm. An App
-# Insights availability test pings AWS /health; when AWS recovers, a metric
-# alert fires an action-group webhook to the recovery-reconcile function,
-# which pushes Azure's rows back to AWS.
-#
-# Note: Standard availability tests only run every 5 min, so Azure notices
-# AWS recovery slower than AWS notices Azure's (Route 53 checks every 30s).
+# Azure-side auto-reconcile. An App Insights availability test pings AWS
+# /health; when AWS recovers, a metric alert fires a webhook to the
+# recovery-reconcile function, which pushes Azure's rows back.
+# Standard tests only run every 5 min, so this side is slower than AWS's 30s.
 
 # Secret guarding the recovery endpoint. Azure Monitor webhooks cannot send a
 # custom header, so the secret travels in the query string instead.
@@ -21,9 +18,8 @@ resource "azurerm_application_insights" "monitor" {
   application_type    = "web"
 }
 
-# Availability test that pings the AWS health endpoint from Azure. A drop in
-# the availabilityResults/availabilityPercentage metric means AWS is down; its
-# return to 100 is the recovery signal.
+# Pings AWS /health from Azure. The availability metric dropping means AWS
+# is down; its return to 100 is the recovery signal.
 resource "azurerm_application_insights_standard_web_test" "aws_health" {
   name                    = "${var.project_name}-aws-health-test"
   resource_group_name     = azurerm_resource_group.main.name
@@ -59,9 +55,8 @@ resource "azurerm_monitor_action_group" "recovery" {
   }
 }
 
-# Alert on the availability metric. It fires while AWS is unhealthy and, more
-# usefully for us, its action group is also invoked on resolution. We keep the
-# window tight so recovery is noticed on the next evaluation after AWS returns.
+# Fires while AWS is unhealthy, and the action group is invoked again on
+# resolution - that resolution is what triggers the reconcile.
 resource "azurerm_monitor_metric_alert" "aws_down" {
   name                = "${var.project_name}-aws-endpoint-down"
   resource_group_name = azurerm_resource_group.main.name

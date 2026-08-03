@@ -31,9 +31,8 @@ function verifyToken(authHeader) {
   }
 }
 
-// 12-24 chars, at least one uppercase, one lowercase, one digit, one
-// special character. Used for register, reset-password, and
-// change-password alike so the rule can't be bypassed via one of them.
+// 12-24 chars with upper, lower, digit and symbol. Used by register,
+// reset-password and change-password alike, so no route skips it.
 function validatePassword(password) {
   if (typeof password !== 'string' || password.length < 12 || password.length > 24) {
     return 'Password must be 12-24 characters long';
@@ -45,12 +44,9 @@ function validatePassword(password) {
   return null; // null = valid
 }
 
-// Shared-secret check for the internal replication endpoints. These are
-// published on the same public API Gateway as everything else, so without
-// this any caller could write straight into the database.
-// Constant-time secret comparison. Hashing both sides first gives them a
-// fixed length, so timingSafeEqual never throws on a length mismatch, and
-// the comparison does not leak how many leading characters matched.
+// Guards the internal /replicate/* endpoints, which sit on the same public
+// API Gateway as everything else. Hashing both sides first fixes their
+// length, so timingSafeEqual can't throw and the timing gives nothing away.
 function secretsMatch(supplied, expected) {
   if (typeof supplied !== 'string' || typeof expected !== 'string') return false;
   const a = crypto.createHash('sha256').update(supplied).digest();

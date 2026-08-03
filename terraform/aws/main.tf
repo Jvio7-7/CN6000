@@ -11,9 +11,8 @@ provider "aws" {
   region = var.aws_region
 }
 
-# Shared VPC placement for every Lambda: private subnets, Lambda security
-# group. Kept in a local so all functions stay identical and there is one
-# place to change it.
+# Shared VPC placement for every Lambda, kept in a local so all functions
+# stay identical and there's one place to change it.
 locals {
   lambda_vpc_subnets = aws_subnet.private[*].id
   lambda_vpc_sg      = [aws_security_group.lambda_sg.id]
@@ -381,10 +380,7 @@ resource "aws_lambda_function" "reset_password" {
   }
 }
 
-# -------------------------------------------------------------------------
-# Profile edit, password change, and ownership-based cancel/list for
-# events and bookings
-# -------------------------------------------------------------------------
+# Profile edit, password change, and ownership-based cancel/list
 
 resource "aws_lambda_function" "update_profile" {
   function_name    = "${var.project_name}-update-profile"

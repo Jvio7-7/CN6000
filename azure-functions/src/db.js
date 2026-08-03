@@ -49,9 +49,8 @@ async function replicateToAws(path, payload) {
   }
 }
 
-// Events - owned by the creating user (userId required), soft-deleted
-// via cancelled_at rather than a hard DELETE (bookings/payments reference
-// the event by foreign key).
+// Events are owned by their creator and soft-deleted (cancelled_at),
+// since bookings and payments reference them by foreign key.
 
 async function createEvent({ userId, title, date, location, capacity, price }) {
   if (new Date(date) <= new Date()) {
@@ -115,9 +114,8 @@ async function listMyEvents(userId) {
   return result.recordset;
 }
 
-// cascades: every active booking against this event gets cancelled too,
-// with a refund notification for anyone who'd completed a payment - see
-// lambda/layer/nodejs/db.js
+// cancels every active booking too, with a refund notification for
+// anyone who had paid
 async function cancelEvent(eventId, userId) {
   const pool = await getPool();
   const result = await pool
@@ -219,13 +217,9 @@ async function replicateEvent(record) {
 
 // Bookings - same ownership + soft-delete pattern
 
-// The capacity check and the insert run inside one transaction, with the
-// event row locked (UPDLOCK, HOLDLOCK). Without the lock, two concurrent
-// bookings could both read the same seat count, both decide there is room,
-// and both insert - taking the event over capacity. The lock serialises
-// bookings for a given event so the count a request reads is still true when
-// it inserts. Replication and the notification happen after the commit, so a
-// slow network call never holds the row lock.
+// The capacity check and the insert share one transaction with the event
+// row locked (UPDLOCK, HOLDLOCK), so two concurrent bookings can't both
+// claim the last seat. Replication runs after the commit.
 async function createBooking({ userId, eventId, attendeeName, attendeeEmail }) {
   const pool = await getPool();
   const transaction = new sql.Transaction(pool);
@@ -484,12 +478,9 @@ async function updateProfile(userId, { name }) {
   return safe;
 }
 
-// GDPR-style account deletion (tombstone + anonymisation). See the AWS
-// db.js copy for the full reasoning: a plain hard DELETE is unsafe here
-// because reconcile would resurrect the row from the peer. Instead PII is
-// overwritten, deleted_at is set as the tombstone, and the id is kept so
-// events/bookings foreign keys stay intact. The user's hosted events are
-// cancelled (refunding attendees via cancelEvent) and their own bookings too.
+// GDPR-style deletion, same as the AWS side: a hard DELETE would be undone
+// by reconcile, so this overwrites the personal fields, sets deleted_at as
+// a tombstone, and keeps the id for the foreign keys.
 async function deleteAccount(userId) {
   const pool = await getPool();
 
@@ -739,9 +730,8 @@ async function listNotifications() {
   return result.recordset;
 }
 
-// resync after a cloud has been down - same as the AWS side in
-// lambda/layer/nodejs/db.js. reads everything and re-sends it; the
-// /replicate/* endpoints upsert so only the missed rows get added.
+// resync after a cloud has been down. resends everything; /replicate/*
+// upserts, so only the missed rows get added.
 async function pushToPeer(path, payload) {
   if (!AWS_BASE_URL) return false;
   try {
