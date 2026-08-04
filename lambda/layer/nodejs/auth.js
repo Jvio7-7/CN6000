@@ -2,7 +2,6 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 
-// same secret on both clouds so a token works on either side
 const JWT_SECRET = process.env.JWT_SECRET;
 const TOKEN_EXPIRY = '24h';
 
@@ -20,7 +19,6 @@ function signToken(user) {
   });
 }
 
-// returns null if token is missing/invalid/expired, never throws
 function verifyToken(authHeader) {
   if (!authHeader || !authHeader.startsWith('Bearer ')) return null;
   const token = authHeader.slice('Bearer '.length);
@@ -31,8 +29,6 @@ function verifyToken(authHeader) {
   }
 }
 
-// 12-24 chars with upper, lower, digit and symbol. Used by register,
-// reset-password and change-password alike, so no route skips it.
 function validatePassword(password) {
   if (typeof password !== 'string' || password.length < 12 || password.length > 24) {
     return 'Password must be 12-24 characters long';

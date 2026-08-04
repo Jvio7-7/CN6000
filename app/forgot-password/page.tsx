@@ -36,7 +36,6 @@ export default function ForgotPasswordPage() {
       });
       const data = await res.json();
       if (!res.ok) {
-        // deliberately explicit if the account doesn't exist
         setError(data.error || 'Something went wrong. Try again.');
         return;
       }

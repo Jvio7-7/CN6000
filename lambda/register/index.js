@@ -1,9 +1,6 @@
 const { createUser, findUserByEmail } = require('/opt/nodejs/db');
 const { hashPassword, validatePassword, signToken } = require('/opt/nodejs/auth');
 
-// no email verification - account is usable immediately, same as
-// signToken issuing a real session right away (see README for why
-// email verification was tried and then removed)
 exports.handler = async (event) => {
   try {
     const body = JSON.parse(event.body || '{}');
@@ -44,9 +41,6 @@ exports.handler = async (event) => {
     }
 
     const passwordHash = await hashPassword(password);
-    // trimmed + lowercased before hashing so "Blue" and "blue " both
-    // match later - this isn't a high-security context, being forgiving
-    // here matters more than exact-match strictness
     const securityAnswerHash = await hashPassword(securityAnswer.trim().toLowerCase());
 
     const user = await createUser({

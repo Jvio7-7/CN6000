@@ -65,8 +65,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setToken(newToken);
   }
 
-  // for profile edits - keeps the header/account UI in sync without a
-  // full page reload or re-fetching /users/me
   function updateUser(updated: UserRecord) {
     setUser(updated);
   }

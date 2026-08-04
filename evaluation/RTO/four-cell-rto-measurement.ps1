@@ -49,13 +49,11 @@ $cooldownSec  = 20
 $runId        = Get-Date -Format "MMddHHmmss"   # unique tag per run so results don't overwrite
 $outCsv       = "four-cell-rto-$runId.csv"
 
-# --- kill / restore ---
 function Kill-Aws     { aws lambda put-function-concurrency --region $awsRegion --function-name $awsFunc --reserved-concurrent-executions 0 2>$null | Out-Null }
 function Restore-Aws  { aws lambda delete-function-concurrency --region $awsRegion --function-name $awsFunc 2>$null | Out-Null }
 function Kill-Azure   { az functionapp stop  -n $azFunc -g $azRg 2>$null | Out-Null }
 function Restore-Azure{ az functionapp start -n $azFunc -g $azRg 2>$null | Out-Null }
 
-# resolve a name once, return the answer text (cnames + hosts joined)
 function Lookup($name, $server) {
     try {
         $r = Resolve-DnsName -Name $name -Server $server -Type CNAME -DnsOnly -QuickTimeout -ErrorAction Stop 2>$null
@@ -82,7 +80,6 @@ function Both {
     }
 }
 
-# is a cloud actually serving again (concurrency released / app started)?
 function Health-Ok($url) {
     try { return ((Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 10 -ErrorAction Stop).StatusCode -eq 200) }
     catch { return $false }
@@ -228,7 +225,6 @@ if (-not ($pf.r53.aws -and $pf.r53.az -and $pf.tm.aws -and $pf.tm.az)) {
     exit 1
 }
 
-# --- run ---
 $script:rows = @()
 for ($t = 1; $t -le $trials; $t++) {
     $script:rows += Run-Kill "aws"   $t

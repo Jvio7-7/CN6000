@@ -1,7 +1,3 @@
-// Pure helpers for the card fields on the payment page. Kept out of the
-// component so they can be unit tested on their own - see
-// evaluation/unit/card.test.ts
-
 export const BULLET = '\u2022';
 
 // Amex (starts 34/37) is 15 digits with a 4-digit code; others are 16/3
@@ -36,7 +32,6 @@ export function unmaskCard(shown: string, prev: string) {
     if (c === BULLET) real += prev[real.length] ?? '';
     else if (/\d/.test(c)) real += c;
   }
-  // cap to this card's length (15 for Amex, else 16)
   return real.slice(0, cardMaxLen(real));
 }
 

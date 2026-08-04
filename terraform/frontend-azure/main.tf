@@ -28,8 +28,6 @@ resource "azurerm_resource_group" "frontend" {
   location = var.azure_region
 }
 
-# separate storage account from the Function App's one, keeps
-# public hosting separate from internal plumbing
 resource "azurerm_storage_account" "frontend" {
   name                     = "${var.project_name}fe${random_string.suffix.result}"
   resource_group_name      = azurerm_resource_group.frontend.name

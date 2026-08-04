@@ -1,6 +1,5 @@
-# Run from the event-app root folder. Builds the static export and syncs
-# it to S3, then invalidates the CloudFront cache so the new version is
-# served immediately instead of waiting for cached copies to expire.
+# Builds the static export, syncs it to S3, and invalidates the CloudFront
+# cache so the new version is served straight away.
 #
 # Usage: .\deploy-frontend-aws.ps1 -BucketName <bucket_name> -DistributionId <distribution_id>
 # (both values come from `terraform output` in terraform\frontend-aws)

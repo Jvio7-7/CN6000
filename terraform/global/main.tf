@@ -16,8 +16,6 @@ provider "aws" {
   region = "us-east-1"
 }
 
-# Public hosted zone for the registered domain; the registrar delegates
-# to these name servers
 
 resource "aws_route53_zone" "main" {
   name = var.zone_name

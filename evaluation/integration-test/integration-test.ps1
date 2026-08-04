@@ -8,7 +8,6 @@ param(
     [ValidateSet('aws','azure','both')] [string]$Target = 'both'
 )
 
-# default: run both clouds back to back by calling this same script twice
 if ($Target -eq 'both') {
     & $PSCommandPath -Target aws
     Write-Host ""
@@ -41,8 +40,6 @@ function Call($method, $url, $body, $token) {
     }
 }
 
-# every check is recorded as well as printed, so the run leaves a CSV behind
-# rather than only console output that scrolls away
 $script:results = @()
 
 function Check($name, $condition, $detail) {
@@ -273,25 +270,18 @@ $r = Call GET "$api/notifications" $null $attToken
 Check "attendee got refund notification" ($r.data.Count -gt 0) "no notifications"
 
 # --- internal endpoints ---
-# these are only ever called by the other cloud or by Azure Monitor, so the
-# test checks the route exists and the shared secret guards it. a missing key
-# has to come back 401. a 404 here would mean the route path is wrong, which
-# is how a broken webhook URL would show up.
+# a missing key must give 401; a 404 here would mean the route path is wrong
 Write-Host "`ninternal endpoints"
 foreach ($ep in @("replicate/users", "replicate/events", "replicate/bookings", "replicate/payments", "replicate/reconcile")) {
     $r = Call POST "$api/$ep" @{ probe = $true } $null
     Check "$ep guarded" ($r.status -eq 401) "got $($r.status)"
 }
 
-# recovery-reconcile only exists on Azure. On AWS the same job is done by a
-# Lambda that SNS invokes, so there's no HTTP route to check.
 if ($Target -eq 'azure') {
     $r = Call POST "$api/internal/recovery-reconcile?key=wrong-key" $null $null
     Check "recovery-reconcile guarded" ($r.status -eq 401) "got $($r.status)"
 }
 
-# --- delete account ---
-# uses a throwaway user so it doesn't disturb the accounts above
 Write-Host "`ndelete account"
 $delEmail = "$tag-delete@test.local"
 $r = Call POST "$api/users/register" @{ name="Delete $tag"; email=$delEmail; password=$pw; securityQuestion="q"; securityAnswer="test answer" } $null
@@ -304,12 +294,6 @@ Check "delete own account" ($r.status -eq 200) "got $($r.status)"
 $r = Call POST "$api/users/login" @{ email=$delEmail; password=$pw } $null
 Check "deleted account cannot log in" ($r.status -eq 401) "got $($r.status)"
 
-# --- cleanup ---
-# The "Tiny" event is deliberately left full by the capacity checks above, so
-# without this it stays visible on the events page after the run. Cancelling
-# it here is a housekeeping step, not a scored check, so the pass count stays
-# comparable between runs. The cancellation replicates to the peer cloud on
-# its own, so one call clears it from both.
 if ($tinyId) {
     $c = Call POST "$api/events/$tinyId/cancel" $null $hostToken
     if ($c.status -eq 200) {

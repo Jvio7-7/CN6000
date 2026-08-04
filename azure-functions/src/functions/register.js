@@ -2,7 +2,6 @@ const { app } = require('@azure/functions');
 const { createUser, findUserByEmail } = require('../db');
 const { hashPassword, validatePassword, signToken } = require('../auth');
 
-// no email verification - see lambda/register/index.js
 app.http('register', {
   methods: ['POST'],
   authLevel: 'anonymous',

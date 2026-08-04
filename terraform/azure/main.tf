@@ -22,16 +22,9 @@ terraform {
 provider "azurerm" {
   features {}
   subscription_id = var.subscription_id
-  # "none" = exact equivalent of the old skip_provider_registration = true -
-  # every resource provider this project needs was already registered on
-  # the subscription during the original v3 deployment, and registration
-  # is a subscription-level state that persists regardless of what this
-  # setting is, so this preserves existing behaviour rather than opting
-  # into v4's new auto-registration modes untested
   resource_provider_registrations = "none"
 }
 
-# random suffix so names don't clash with other students
 resource "random_string" "suffix" {
   length  = 6
   special = false
@@ -43,7 +36,6 @@ resource "azurerm_resource_group" "main" {
   location = var.azure_region
 }
 
-# every Function App needs a storage account for its own bookkeeping
 
 resource "azurerm_storage_account" "main" {
   name                     = "${var.project_name}st${random_string.suffix.result}"
@@ -107,7 +99,6 @@ resource "azurerm_linux_function_app" "main" {
   }
 }
 
-# Basic tier, cheapest option
 
 resource "azurerm_mssql_server" "main" {
   name                         = "${var.project_name}-sql-${random_string.suffix.result}"
@@ -118,7 +109,6 @@ resource "azurerm_mssql_server" "main" {
   administrator_login_password = var.sql_admin_password
 }
 
-# same lag issue as the storage account
 resource "time_sleep" "wait_sql_server" {
   depends_on      = [azurerm_mssql_server.main]
   create_duration = "30s"
@@ -142,7 +132,6 @@ resource "azurerm_mssql_firewall_rule" "allow_azure_services" {
   depends_on       = [time_sleep.wait_sql_server]
 }
 
-# so I can run schema-mssql.sql from my own machine
 data "http" "my_ip" {
   url = "https://api.ipify.org"
 }

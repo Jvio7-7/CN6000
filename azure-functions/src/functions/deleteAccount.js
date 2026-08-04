@@ -2,8 +2,6 @@ const { app } = require('@azure/functions');
 const { deleteAccount } = require('../db');
 const { verifyToken } = require('../auth');
 
-// Deletes the caller's own account. The id comes from the token, so a user
-// can only delete themselves. Mirrors the AWS delete-account Lambda.
 app.http('deleteAccount', {
   methods: ['DELETE'],
   authLevel: 'anonymous',

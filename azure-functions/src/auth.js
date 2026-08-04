@@ -2,7 +2,6 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 
-// must match the AWS side exactly
 const JWT_SECRET = process.env.JWT_SECRET;
 const TOKEN_EXPIRY = '24h';
 
@@ -30,7 +29,6 @@ function verifyToken(authHeader) {
   }
 }
 
-// mirrors lambda/layer/nodejs/auth.js exactly
 function validatePassword(password) {
   if (typeof password !== 'string' || password.length < 12 || password.length > 24) {
     return 'Password must be 12-24 characters long';

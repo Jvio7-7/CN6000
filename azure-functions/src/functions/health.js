@@ -1,7 +1,6 @@
 const { app } = require('@azure/functions');
 const sql = require('mssql');
 
-// mirrors the lambda health check, actually hits the db
 let poolPromise;
 
 function getPool() {

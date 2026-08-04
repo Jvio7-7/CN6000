@@ -18,8 +18,6 @@ resource "azurerm_application_insights" "monitor" {
   application_type    = "web"
 }
 
-# Pings AWS /health from Azure. The availability metric dropping means AWS
-# is down; its return to 100 is the recovery signal.
 resource "azurerm_application_insights_standard_web_test" "aws_health" {
   name                    = "${var.project_name}-aws-health-test"
   resource_group_name     = azurerm_resource_group.main.name
@@ -55,8 +53,6 @@ resource "azurerm_monitor_action_group" "recovery" {
   }
 }
 
-# Fires while AWS is unhealthy, and the action group is invoked again on
-# resolution - that resolution is what triggers the reconcile.
 resource "azurerm_monitor_metric_alert" "aws_down" {
   name                = "${var.project_name}-aws-endpoint-down"
   resource_group_name = azurerm_resource_group.main.name

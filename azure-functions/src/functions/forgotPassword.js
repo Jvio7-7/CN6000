@@ -1,8 +1,6 @@
 const { app } = require('@azure/functions');
 const { getSecurityQuestion } = require('../db');
 
-// deliberately DOES reveal whether the email is registered - see
-// lambda/forgot-password/index.js
 app.http('forgotPassword', {
   methods: ['POST'],
   authLevel: 'anonymous',

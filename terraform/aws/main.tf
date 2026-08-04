@@ -11,8 +11,6 @@ provider "aws" {
   region = var.aws_region
 }
 
-# Shared VPC placement for every Lambda, kept in a local so all functions
-# stay identical and there's one place to change it.
 locals {
   lambda_vpc_subnets = aws_subnet.private[*].id
   lambda_vpc_sg      = [aws_security_group.lambda_sg.id]
@@ -45,7 +43,6 @@ resource "aws_lambda_layer_version" "db_layer" {
   compatible_runtimes = ["nodejs22.x"]
 }
 
-# shared IAM role for all the lambdas
 
 resource "aws_iam_role" "lambda_exec" {
   name = "${var.project_name}-lambda-exec-role"
@@ -380,7 +377,6 @@ resource "aws_lambda_function" "reset_password" {
   }
 }
 
-# Profile edit, password change, and ownership-based cancel/list
 
 resource "aws_lambda_function" "update_profile" {
   function_name    = "${var.project_name}-update-profile"
@@ -553,7 +549,6 @@ resource "aws_lambda_function" "my_bookings" {
   }
 }
 
-# fake payments, see sql/schema-postgres.sql
 
 resource "aws_lambda_function" "payments" {
   function_name    = "${var.project_name}-payments"
@@ -602,7 +597,6 @@ resource "aws_lambda_function" "replicate_payments" {
   }
 }
 
-# fake notifications, not replicated
 
 resource "aws_lambda_function" "list_notifications" {
   function_name    = "${var.project_name}-list-notifications"
@@ -626,7 +620,6 @@ resource "aws_lambda_function" "list_notifications" {
   }
 }
 
-# API Gateway routes
 
 resource "aws_apigatewayv2_api" "http_api" {
   name          = "${var.project_name}-api"
@@ -671,8 +664,6 @@ resource "aws_apigatewayv2_stage" "default" {
     throttling_burst_limit = 6
   }
 
-  # register has a higher limit than the other auth routes since the load
-  # test hits it hardest and shouldn't be throttled during measurement
   route_settings {
     route_key              = "POST /users/register"
     throttling_rate_limit  = 25

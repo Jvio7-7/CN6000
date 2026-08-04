@@ -31,7 +31,6 @@ exports.handler = async (event) => {
       };
     }
 
-    // same normalisation as when the answer was first set - see register
     const normalisedAnswer = answer.trim().toLowerCase();
     const answerCorrect = await verifyPassword(normalisedAnswer, user.security_answer_hash);
     if (!answerCorrect) {

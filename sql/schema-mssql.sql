@@ -40,7 +40,6 @@ CREATE TABLE users (
   origin_cloud NVARCHAR(10) NOT NULL DEFAULT 'azure'
 );
 
--- see schema-postgres.sql for why user_id and cancelled_at exist
 CREATE TABLE events (
   id UNIQUEIDENTIFIER PRIMARY KEY,
   user_id UNIQUEIDENTIFIER NOT NULL,
@@ -67,7 +66,6 @@ CREATE TABLE bookings (
   CONSTRAINT FK_bookings_users FOREIGN KEY (user_id) REFERENCES users(id)
 );
 
--- fake payments, see sql/schema-postgres.sql
 CREATE TABLE payments (
   id UNIQUEIDENTIFIER PRIMARY KEY,
   booking_id UNIQUEIDENTIFIER NOT NULL,

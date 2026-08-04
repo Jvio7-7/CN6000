@@ -7,10 +7,7 @@
 #   post = loss after a manual reconcile - should drop to 0
 # story: "the outage lost N users, reconcile brought it back to 0".
 #
-# writes three files per run:
-#   rpo-<id>.csv            summary (one row per direction, with event times)
-#   rpo-<id>-register.csv   every register attempt (seq, time, status, phase)
-#   rpo-<id>-verify.csv     every user checked on both clouds (raw + post)
+# writes a summary csv plus per-user register and verify logs.
 #
 # aws kill = disable the replicate-receiver lambdas (matches Azure functionapp
 # stop - both cut the replication path). login stays up so we can always check.
@@ -54,7 +51,6 @@ function Exists($base, $seq, $tag) {
     catch { return $false }
 }
 
-# check every user on both clouds, log each one, return the loss count
 function CheckAll($scenario, $surv, $down, $first, $last, $tag, $stage) {
     $n = 0
     for ($s = $first; $s -le $last; $s++) {
@@ -112,7 +108,6 @@ function Run($downCloud) {
     $raw = CheckAll $scen $surv $down $first $last $tag "raw"
     Write-Host "  RAW loss: $raw / $($last-$first+1)" -ForegroundColor Yellow
 
-    # manual reconcile from survivor, then re-check every user
     $recTime = Now
     Write-Host "  $recTime manual reconcile from $sName..." -ForegroundColor DarkGray
     try { curl.exe -s -X POST "$surv/replicate/reconcile" -H "x-replication-key: $replKey" | Out-Null } catch {}

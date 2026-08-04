@@ -169,7 +169,6 @@ export default function AccountPage() {
       await fetch(`${API_BASE_URL}/events/${id}/cancel`, { method: 'POST', headers: authHeaders() });
       refreshMyEvents();
     } catch (err) {
-      // silent - the row just won't update, user can retry
     }
   }
 
@@ -202,7 +201,6 @@ export default function AccountPage() {
       await fetch(`${API_BASE_URL}/bookings/${id}/cancel`, { method: 'POST', headers: authHeaders() });
       refreshMyBookings();
     } catch (err) {
-      // silent
     }
   }
 

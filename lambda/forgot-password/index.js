@@ -1,8 +1,5 @@
 const { getSecurityQuestion } = require('/opt/nodejs/db');
 
-// deliberately DOES reveal whether the email is registered, same
-// product decision as before - now returns the security question
-// itself, never the answer
 exports.handler = async (event) => {
   try {
     const body = JSON.parse(event.body || '{}');

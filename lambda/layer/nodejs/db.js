@@ -1,8 +1,6 @@
 const { Pool } = require('pg');
 const crypto = require('crypto');
 
-// user-fixable errors like "event is full" - handlers turn these into
-// 400/409 instead of a 500
 class ValidationError extends Error {}
 
 // AWS side. Every write: generate a UUID, write to RDS, replicate to Azure.
@@ -48,8 +46,6 @@ async function replicateToAzure(path, payload) {
   }
 }
 
-// Events are owned by their creator and soft-deleted (cancelled_at),
-// since bookings and payments reference them by foreign key.
 
 async function createEvent({ userId, title, date, location, capacity, price }) {
   if (new Date(date) <= new Date()) {
@@ -75,8 +71,6 @@ async function createEvent({ userId, title, date, location, capacity, price }) {
   return record;
 }
 
-// booking_count is counted live rather than stored, so there's no
-// counter to keep in sync
 async function listEvents() {
   const db = getPool();
   const result = await db.query(
@@ -101,9 +95,6 @@ async function listMyEvents(userId) {
   return result.rows;
 }
 
-// Returns null if the event doesn't exist or isn't this user's, so the
-// caller can send a 404. Cancels every active booking too, and writes a
-// refund notification for anyone who had paid.
 async function cancelEvent(eventId, userId) {
   const db = getPool();
   const result = await db.query(
@@ -183,7 +174,6 @@ async function replicateEvent(record) {
   );
 }
 
-// Bookings - same ownership + soft-delete pattern as events
 
 // The capacity check and the insert share one transaction with the event
 // row locked, so two concurrent bookings can't both claim the last seat.
@@ -196,7 +186,6 @@ async function createBooking({ userId, eventId, attendeeName, attendeeEmail }) {
   try {
     await client.query('BEGIN');
 
-    // locking the event row is what serialises concurrent bookings
     const eventResult = await client.query(
       'SELECT user_id, capacity FROM events WHERE id = $1 FOR UPDATE',
       [eventId]
@@ -273,8 +262,6 @@ async function listMyBookings(userId) {
   return result.rows;
 }
 
-// shared by the attendee's own cancel (checks ownership) and by
-// cancelEvent's cascade (doesn't - the host is cancelling for them)
 async function cancelBookingInternal(bookingId, userId = null) {
   const db = getPool();
   const conditions = userId ? 'id = $1 AND user_id = $2 AND cancelled_at IS NULL' : 'id = $1 AND cancelled_at IS NULL';
@@ -293,8 +280,6 @@ async function cancelBookingInternal(bookingId, userId = null) {
   return record;
 }
 
-// participant cancelling their own booking - sends a refund notification
-// if they'd actually paid (nothing to refund otherwise)
 async function cancelBooking(bookingId, userId) {
   const record = await cancelBookingInternal(bookingId, userId);
   if (!record) return null;
@@ -344,9 +329,7 @@ async function replicateBooking(record) {
   );
 }
 
-// Users - registration, profile edit, password change/reset
 
-// no email verification - see README. The account works immediately.
 async function createUser({ name, email, passwordHash, securityQuestion, securityAnswerHash }) {
   const id = crypto.randomUUID();
   const db = getPool();
@@ -383,16 +366,12 @@ async function findUserById(id) {
   return result.rows[0] || null;
 }
 
-// includes password_hash, unlike findUserById - only for internal use by
-// the change-password handler, which needs to verify the current password
 async function findUserByIdWithPassword(id) {
   const db = getPool();
   const result = await db.query('SELECT * FROM users WHERE id = $1 AND deleted_at IS NULL', [id]);
   return result.rows[0] || null;
 }
 
-// name-only update - password changes go through changePassword instead,
-// since that one needs the current-password check
 async function updateProfile(userId, { name }) {
   const db = getPool();
   const result = await db.query(
@@ -416,8 +395,6 @@ async function updateProfile(userId, { name }) {
 async function deleteAccount(userId) {
   const db = getPool();
 
-  // cancel every event this user hosts - reuses cancelEvent so attendees are
-  // refunded and each cancellation replicates on its own
   const owned = await db.query(
     'SELECT id FROM events WHERE user_id = $1 AND cancelled_at IS NULL',
     [userId]
@@ -426,7 +403,6 @@ async function deleteAccount(userId) {
     await cancelEvent(row.id, userId);
   }
 
-  // cancel this user's own bookings on other hosts' events
   const myBookings = await db.query(
     `UPDATE bookings SET cancelled_at = NOW()
      WHERE user_id = $1 AND cancelled_at IS NULL
@@ -470,8 +446,6 @@ async function deleteAccount(userId) {
   return true;
 }
 
-// currentPasswordHash/newPasswordHash are handled by the caller (auth.js) -
-// db.js just does the lookup, comparison, and write
 async function changePassword(userId, newPasswordHash) {
   const db = getPool();
   const result = await db.query(
@@ -486,7 +460,6 @@ async function changePassword(userId, newPasswordHash) {
   return true;
 }
 
-// upsert - could be a new user or a profile/password/answer update
 async function replicateUser(record) {
   const db = getPool();
   await db.query(
@@ -512,16 +485,12 @@ async function replicateUser(record) {
   );
 }
 
-// Returns null if there's no account for this email. Returns the question
-// only, never the answer.
 async function getSecurityQuestion(email) {
   const user = await findUserByEmail(email);
   if (!user) return null;
   return user.security_question;
 }
 
-// the caller checks the answer with auth.js's verifyPassword; db.js just
-// does the lookup and the write
 async function resetPasswordWithAnswer({ email, newPasswordHash }) {
   const db = getPool();
   const user = await findUserByEmail(email);
@@ -537,7 +506,6 @@ async function resetPasswordWithAnswer({ email, newPasswordHash }) {
   return true;
 }
 
-// Payments (fake) and notifications (fake, not replicated)
 
 async function createPayment({ bookingId, amount, currency, cardNumber }) {
   const id = crypto.randomUUID();
@@ -621,8 +589,6 @@ async function listNotifications() {
 // writes made while the peer was unreachable never arrived. this resends
 // everything; /replicate/* upserts, so only the missing rows get added.
 
-// 10s timeout here rather than the usual 3s, so a large resync isn't cut
-// off partway. returns true/false so the caller can count successes.
 async function pushToPeer(path, payload) {
   if (!AZURE_BASE_URL) return false;
   try {

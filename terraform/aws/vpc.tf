@@ -19,8 +19,6 @@ resource "aws_internet_gateway" "main" {
   tags   = { Name = "${var.project_name}-igw" }
 }
 
-# Two public subnets (NAT gateway lives here) and two private subnets
-# (RDS and Lambdas live here), spread across two AZs for the RDS subnet group.
 
 resource "aws_subnet" "public" {
   count                   = 2
@@ -39,7 +37,6 @@ resource "aws_subnet" "private" {
   tags              = { Name = "${var.project_name}-private-${count.index}" }
 }
 
-# Public route table: everything out via the internet gateway.
 
 resource "aws_route_table" "public" {
   vpc_id = aws_vpc.main.id
@@ -56,8 +53,6 @@ resource "aws_route_table_association" "public" {
   route_table_id = aws_route_table.public.id
 }
 
-# Single NAT gateway in the first public subnet. Private subnets route their
-# outbound traffic through it, which is how the Lambdas reach Azure.
 
 resource "aws_eip" "nat" {
   domain = "vpc"
@@ -86,7 +81,6 @@ resource "aws_route_table_association" "private" {
   route_table_id = aws_route_table.private.id
 }
 
-# Subnet group so RDS can be placed in the private subnets.
 
 resource "aws_db_subnet_group" "main" {
   name       = "${var.project_name}-db-subnet-group"
@@ -94,8 +88,6 @@ resource "aws_db_subnet_group" "main" {
   tags       = { Name = "${var.project_name}-db-subnet-group" }
 }
 
-# Security group for the Lambdas. No inbound needed; all outbound allowed so
-# they can reach RDS on 5432 and the Azure peer over HTTPS via the NAT gateway.
 
 resource "aws_security_group" "lambda_sg" {
   name        = "${var.project_name}-lambda-sg"

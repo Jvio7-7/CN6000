@@ -1,8 +1,6 @@
 const { deleteAccount } = require('/opt/nodejs/db');
 const { verifyToken } = require('/opt/nodejs/auth');
 
-// Deletes the caller's own account. Requires a valid token; a user can only
-// delete themselves (the id comes from the token, not the request body).
 exports.handler = async (event) => {
   try {
     const authHeader = event.headers?.authorization || event.headers?.Authorization;

@@ -8,8 +8,6 @@ export default function Nav() {
   const { user, loading, logout } = useAuth();
   const [open, setOpen] = useState(false);
 
-  // close the menu after tapping a link, otherwise it stays open over
-  // the page you just went to
   const close = () => setOpen(false);
 
   return (

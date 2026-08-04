@@ -20,12 +20,9 @@ CREATE TABLE users (
   origin_cloud VARCHAR(10) NOT NULL DEFAULT 'aws'
 );
 
--- events and bookings now require a logged-in owner (user_id), so
--- cancel/delete can check ownership. cancelled_at is a soft delete -
--- hard-deleting an event that already has bookings/payments against it
--- would violate the foreign keys below, and soft delete also means
--- cancellation is just another field to replicate, not a whole new
--- "delete" message type.
+-- cancelled_at is a soft delete: hard-deleting an event with bookings
+-- against it would violate the foreign keys, and a cancellation is then
+-- just another field to replicate.
 CREATE TABLE events (
   id UUID PRIMARY KEY,
   user_id UUID NOT NULL REFERENCES users(id),
@@ -49,7 +46,6 @@ CREATE TABLE bookings (
   origin_cloud VARCHAR(10) NOT NULL DEFAULT 'aws'
 );
 
--- fake payments, no real processor. card ending in 0000 = declined
 CREATE TABLE payments (
   id UUID PRIMARY KEY,
   booking_id UUID NOT NULL REFERENCES bookings(id),
@@ -61,10 +57,8 @@ CREATE TABLE payments (
   origin_cloud VARCHAR(10) NOT NULL DEFAULT 'aws'
 );
 
--- log of booking/payment/cancellation events, shown on the account page.
--- no email provider - see security_question above for why password
--- reset doesn't need one either. not replicated - just a log of what
--- happened on this cloud, not shared state
+-- activity log shown on the account page. not replicated - it records what
+-- happened on this cloud, it isn't shared state.
 CREATE TABLE notifications (
   id UUID PRIMARY KEY,
   recipient_email VARCHAR(255) NOT NULL,

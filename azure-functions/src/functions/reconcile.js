@@ -2,8 +2,6 @@ const { app } = require('@azure/functions');
 const { reconcileToPeer } = require('../db');
 const { checkReplicationKey } = require('../auth');
 
-// pushes all local rows to the other cloud to fill in whatever it missed
-// while it was down. fine to run any time. returns the row counts sent.
 app.http('reconcile', {
   methods: ['POST'],
   authLevel: 'anonymous',

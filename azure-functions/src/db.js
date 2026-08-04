@@ -1,7 +1,6 @@
 const sql = require('mssql');
 const crypto = require('crypto');
 
-// mirrors lambda/layer/nodejs/db.js's ValidationError
 class ValidationError extends Error {}
 
 // Azure side, mirrors lambda/layer/nodejs/db.js. Replication awaited here too.
@@ -49,8 +48,6 @@ async function replicateToAws(path, payload) {
   }
 }
 
-// Events are owned by their creator and soft-deleted (cancelled_at),
-// since bookings and payments reference them by foreign key.
 
 async function createEvent({ userId, title, date, location, capacity, price }) {
   if (new Date(date) <= new Date()) {
@@ -84,8 +81,6 @@ async function createEvent({ userId, title, date, location, capacity, price }) {
   return record;
 }
 
-// booking_count is a live count, not a stored column - see
-// lambda/layer/nodejs/db.js
 async function listEvents() {
   const pool = await getPool();
   const result = await pool
@@ -114,8 +109,6 @@ async function listMyEvents(userId) {
   return result.recordset;
 }
 
-// cancels every active booking too, with a refund notification for
-// anyone who had paid
 async function cancelEvent(eventId, userId) {
   const pool = await getPool();
   const result = await pool
@@ -215,7 +208,6 @@ async function replicateEvent(record) {
     );
 }
 
-// Bookings - same ownership + soft-delete pattern
 
 // The capacity check and the insert share one transaction with the event
 // row locked (UPDLOCK, HOLDLOCK), so two concurrent bookings can't both
@@ -227,7 +219,6 @@ async function createBooking({ userId, eventId, attendeeName, attendeeEmail }) {
 
   await transaction.begin();
   try {
-    // locking the event row is what serialises concurrent bookings
     const eventResult = await new sql.Request(transaction)
       .input('eventId', sql.UniqueIdentifier, eventId)
       .query('SELECT user_id, capacity FROM events WITH (UPDLOCK, HOLDLOCK) WHERE id = @eventId');
@@ -307,8 +298,6 @@ async function listMyBookings(userId) {
   return result.recordset;
 }
 
-// shared core used both by the participant's own cancel request and by
-// cancelEvent's cascade - see lambda/layer/nodejs/db.js
 async function cancelBookingInternal(bookingId, userId = null) {
   const pool = await getPool();
   const request = pool.request().input('id', sql.UniqueIdentifier, bookingId);
@@ -330,8 +319,6 @@ async function cancelBookingInternal(bookingId, userId = null) {
   return record;
 }
 
-// participant cancelling their own booking - refund notification if
-// they'd actually paid
 async function cancelBooking(bookingId, userId) {
   const record = await cancelBookingInternal(bookingId, userId);
   if (!record) return null;
@@ -398,10 +385,7 @@ async function replicateBooking(record) {
     );
 }
 
-// Users - registration, profile edit, password change/reset
 
-// no email verification - account usable immediately, mirrors
-// lambda/layer/nodejs/db.js
 async function createUser({ name, email, passwordHash, securityQuestion, securityAnswerHash }) {
   const id = crypto.randomUUID();
   const pool = await getPool();
@@ -448,8 +432,6 @@ async function findUserById(id) {
   return result.recordset[0] || null;
 }
 
-// includes password_hash, unlike findUserById - only for internal use by
-// the change-password handler
 async function findUserByIdWithPassword(id) {
   const pool = await getPool();
   const result = await pool
@@ -558,7 +540,6 @@ async function changePassword(userId, newPasswordHash) {
   return true;
 }
 
-// upsert - could be a new user or a profile/password/answer update
 async function replicateUser(record) {
   const pool = await getPool();
   const existing = await pool
@@ -602,8 +583,6 @@ async function replicateUser(record) {
     );
 }
 
-// returns null if no account exists for this email - see
-// lambda/layer/nodejs/db.js for the existence-disclosure reasoning
 async function getSecurityQuestion(email) {
   const user = await findUserByEmail(email);
   if (!user) return null;
@@ -629,7 +608,6 @@ async function resetPasswordWithAnswer({ email, newPasswordHash }) {
   return true;
 }
 
-// Payments (fake) and notifications (fake, not replicated)
 
 async function createPayment({ bookingId, amount, currency, cardNumber }) {
   const id = crypto.randomUUID();

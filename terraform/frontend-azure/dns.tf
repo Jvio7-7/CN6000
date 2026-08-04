@@ -1,7 +1,3 @@
-# --- DNS / Traffic Manager (merged in from the old azure-dns and
-# traffic-manager stacks) ---
-# These sit in this stack's resource group (gather-frontend-rg), which is why
-# they moved here rather than into the backend stack.
 
 locals {
   aws_api_host    = "l30myjhqlk.execute-api.ap-southeast-1.amazonaws.com"
@@ -45,8 +41,6 @@ resource "azurerm_traffic_manager_external_endpoint" "azure" {
   weight     = 50
 }
 
-# Azure DNS zone: the Azure-side authoritative copy of gather-up.info, mirroring
-# the Route 53 records so either provider answers consistently.
 resource "azurerm_dns_zone" "main" {
   name                = "gather-up.info"
   resource_group_name = azurerm_resource_group.frontend.name
@@ -68,7 +62,6 @@ resource "azurerm_dns_cname_record" "www" {
   record              = local.cloudfront_host
 }
 
-# validation records mirrored from Route 53
 resource "azurerm_dns_cname_record" "acm_api" {
   name                = "_8e0f67f239be0c2a220ddee04a421f74.api"
   zone_name           = azurerm_dns_zone.main.name

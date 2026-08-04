@@ -3,7 +3,6 @@
 # a Lambda (via SNS) that calls the AWS reconcile endpoint, so AWS pushes any
 # writes Azure missed while it was down.
 
-# --- IAM role for the trigger Lambda ---
 resource "aws_iam_role" "reconcile_trigger" {
   name = "${var.record_name}-reconcile-trigger-role"
 
@@ -22,7 +21,6 @@ resource "aws_iam_role_policy_attachment" "reconcile_trigger_basic" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
 
-# --- trigger Lambda: calls the reconcile endpoint over HTTPS ---
 data "archive_file" "reconcile_trigger" {
   type        = "zip"
   output_path = "${path.module}/reconcile-trigger.zip"
@@ -114,7 +112,6 @@ resource "aws_lambda_function" "reconcile_trigger" {
   }
 }
 
-# --- SNS topic linking the alarm to the trigger Lambda ---
 resource "aws_sns_topic" "azure_recovery" {
   name = "${var.record_name}-azure-recovery"
 }
@@ -133,7 +130,6 @@ resource "aws_lambda_permission" "allow_sns" {
   source_arn    = aws_sns_topic.azure_recovery.arn
 }
 
-# --- CloudWatch alarm on the Azure health check ---
 # HealthCheckStatus is 1 when healthy, 0 when down. Notify on the OK
 # transition (recovery); 3 healthy periods are required to avoid flapping.
 resource "aws_cloudwatch_metric_alarm" "azure_down" {
@@ -148,7 +144,6 @@ resource "aws_cloudwatch_metric_alarm" "azure_down" {
   comparison_operator = "LessThanThreshold"
   treat_missing_data  = "breaching"
 
-  # fire the trigger when the alarm clears (Azure recovered)
   ok_actions = [aws_sns_topic.azure_recovery.arn]
 
   alarm_description = "Azure endpoint health; OK transition triggers reconcile from AWS."

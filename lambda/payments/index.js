@@ -22,7 +22,6 @@ exports.handler = async (event) => {
 
     const payment = await createPayment({ bookingId, amount, currency, cardNumber });
 
-    // decline is a normal outcome, not a server error
     const statusCode = payment.status === 'declined' ? 402 : 201;
 
     return {
